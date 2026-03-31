@@ -1,0 +1,21 @@
+# .containerignore
+
+# Ignore the local database and instance state
+instance/
+*.db
+*.sqlite3
+
+# Ignore Python cache and environments
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+
+# Ignore the Containerfile itself (optional but good practice)
+Containerfile
+Dockerfile
+
+# Ignore OS files
+.DS_Store

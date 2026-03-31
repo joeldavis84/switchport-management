@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>ARP Table: {{ switch.ip_address }}</h2>
+    <a href="{{ url_for('switches.manage_switch', id=switch.id) }}" class="btn btn-secondary">Back to Manage</a>
+</div>
+<hr>
+
+<div class="table-responsive">
+    <table class="table table-striped table-hover table-bordered">
+        <thead class="table-dark">
+            <tr>
+                <th>IP Address</th>
+                <th>MAC Address</th>
+                <th>Interface</th>
+                <th>Age (Seconds)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in arp_data %}
+            <tr>
+                <td>{{ entry.address }}</td>
+                <td>{{ entry.hwAddress }}</td>
+                <td>{{ entry.interface }}</td>
+                <td>{{ entry.age }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4" class="text-center text-muted">No ARP entries found or unable to connect.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

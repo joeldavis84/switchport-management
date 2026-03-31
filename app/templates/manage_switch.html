@@ -1,0 +1,153 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Manage Switch: {{ switch.ip_address }}</h2>
+    <a href="{{ url_for('switches.arp_table', id=switch.id) }}" class="btn btn-info">View ARP Table</a>
+</div>
+
+<hr>
+
+{% if not data.hash %}
+    <div class="alert alert-danger">Could not connect to the switch or parse data.</div>
+{% else %}
+    <form method="POST" action="{{ url_for('switches.update_switch', id=switch.id) }}" id="configForm">
+        <div class="mb-3">
+            <label class="form-label">Select Interface</label>
+            <select class="form-select" name="interface" id="interfaceSelect" required>
+                <option value="">-- Choose an Interface --</option>
+                {% for intf in data.interfaces %}
+                <option value="{{ intf.name }}" 
+                        data-desc="{{ intf.description }}" 
+                        data-mode="{{ intf.mode }}" 
+                        data-access="{{ intf.access_vlan }}" 
+                        data-trunk="{{ intf.trunk_vlans }}">
+                    {{ intf.name }} (Mode: {{ intf.mode }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div id="interfaceDetails" style="display:none;">
+            <div class="mb-3">
+                <label class="form-label">Description</label>
+                <input type="text" class="form-control" name="description" id="portDesc">
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Switchport Mode</label>
+                <select class="form-select" name="mode" id="modeSelect">
+                    <option value="access">Access</option>
+                    <option value="trunk">Trunk</option>
+                </select>
+            </div>
+
+            <div class="mb-3" id="accessUI">
+                <label class="form-label">Access VLAN (Select One)</label>
+                {% for vlan in data.vlans %}
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="access_vlan" value="{{ vlan.id }}" id="radio_{{ vlan.id }}">
+                    <label class="form-check-label" for="radio_{{ vlan.id }}">VLAN {{ vlan.id }} ({{ vlan.name }})</label>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="mb-3" id="trunkUI" style="display:none;">
+                <label class="form-label">Trunk Allowed VLANs</label>
+                {% for vlan in data.vlans %}
+                <div class="form-check">
+                    <input class="form-check-input trunk-checkbox" type="checkbox" name="trunk_vlans" value="{{ vlan.id }}" id="check_{{ vlan.id }}">
+                    <label class="form-check-label" for="check_{{ vlan.id }}">VLAN {{ vlan.id }} ({{ vlan.name }})</label>
+                </div>
+                {% endfor %}
+            </div>
+
+            <button type="button" class="btn btn-warning" onclick="confirmSubmit()">Apply & Save Configuration</button>
+        </div>
+    </form>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentHash = "{{ data.hash }}";
+    const switchId = "{{ switch.id }}";
+
+    // 10-second polling for config updates
+    setInterval(() => {
+        fetch(`/api/hash/${switchId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.hash && data.hash !== currentHash) {
+                    if (confirm("The switch configuration has changed in the background. Do you want to refresh the page and lose your unsaved changes?")) {
+                        window.location.reload();
+                    } else {
+                        // Update hash so we don't spam the user with prompts
+                        currentHash = data.hash; 
+                    }
+                }
+            })
+            .catch(err => console.error("Polling error:", err));
+    }, 10000);
+
+    const intfSelect = document.getElementById('interfaceSelect');
+    const modeSelect = document.getElementById('modeSelect');
+    const detailsDiv = document.getElementById('interfaceDetails');
+    const accessUI = document.getElementById('accessUI');
+    const trunkUI = document.getElementById('trunkUI');
+    const portDesc = document.getElementById('portDesc');
+
+    function updateUI() {
+        const mode = modeSelect.value;
+        if (mode === 'access') {
+            accessUI.style.display = 'block';
+            trunkUI.style.display = 'none';
+        } else {
+            accessUI.style.display = 'none';
+            trunkUI.style.display = 'block';
+        }
+    }
+
+    modeSelect.addEventListener('change', updateUI);
+
+    intfSelect.addEventListener('change', function() {
+        if (!this.value) {
+            detailsDiv.style.display = 'none';
+            return;
+        }
+        
+        detailsDiv.style.display = 'block';
+        const selected = this.options[this.selectedIndex];
+        
+        portDesc.value = selected.dataset.desc;
+        modeSelect.value = selected.dataset.mode === 'trunk' ? 'trunk' : 'access';
+        updateUI();
+
+        // Reset inputs
+        document.querySelectorAll('input[type="radio"]').forEach(el => el.checked = false);
+        document.querySelectorAll('.trunk-checkbox').forEach(el => el.checked = false);
+
+        // Populate existing configuration
+        if (modeSelect.value === 'access') {
+            const accVlan = selected.dataset.access;
+            const radio = document.getElementById('radio_' + accVlan);
+            if(radio) radio.checked = true;
+        } else {
+            const trkVlans = selected.dataset.trunk.split(',');
+            // Note: complex ranges like '1-10,20' require more robust JS parsing in production, 
+            // basic array matching shown here for explicit enumerations.
+            trkVlans.forEach(v => {
+                const check = document.getElementById('check_' + v.trim());
+                if(check) check.checked = true;
+            });
+        }
+    });
+
+    function confirmSubmit() {
+        if (confirm("WARNING: You are about to apply these changes and persistently save the running configuration to the startup configuration. Proceed?")) {
+            document.getElementById('configForm').submit();
+        }
+    }
+</script>
+{% endblock %}
