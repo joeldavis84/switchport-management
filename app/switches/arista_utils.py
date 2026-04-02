@@ -1,6 +1,52 @@
-import json
+import errno
 import hashlib
+import json
+import logging
+
+import paramiko
 from netmiko import ConnectHandler
+from netmiko.exceptions import NetmikoAuthenticationException, NetmikoTimeoutException
+
+logger = logging.getLogger(__name__)
+
+
+def format_connection_error(host: str, username: str, exc: BaseException) -> str:
+    """Map netmiko/paramiko/socket failures to clear, actionable messages."""
+    who = f"{host} (SSH user: {username})" if username else str(host)
+
+    if isinstance(exc, NetmikoTimeoutException):
+        return (
+            f"SSH timed out to {who}. Check routing, firewalls, and that TCP port 22 is open on the switch."
+        )
+    if isinstance(exc, (NetmikoAuthenticationException, paramiko.AuthenticationException)):
+        return (
+            f"SSH authentication failed for {who}. "
+            "Confirm the username and that this process can use a key under ~/.ssh (or your SSH agent)."
+        )
+    if isinstance(exc, paramiko.SSHException):
+        return f"SSH error for {who}: {exc}"
+
+    if isinstance(exc, ConnectionRefusedError):
+        return (
+            f"Connection refused to {host}:22. SSH may be disabled, the port may differ, or a firewall rejected the connection."
+        )
+
+    if isinstance(exc, TimeoutError):
+        return f"Timed out reaching {who} (socket-level timeout)."
+
+    if isinstance(exc, OSError) and exc.errno is not None:
+        if exc.errno in (errno.EHOSTUNREACH, errno.ENETUNREACH):
+            return f"No route to host {host} (network unreachable)."
+        if exc.errno == errno.ECONNREFUSED:
+            return (
+                f"Connection refused to {host}:22. SSH may not be listening or the address may be wrong."
+            )
+
+    if isinstance(exc, OSError):
+        return f"Network error connecting to {who}: {type(exc).__name__}: {exc}"
+
+    return f"Could not complete SSH session to {who}: {type(exc).__name__}: {exc}"
+
 
 def get_connection(ip, username):
     # netmiko automatically looks in ~/.ssh/ if use_keys=True
@@ -17,12 +63,15 @@ def get_config_hash(ip, username):
     try:
         with get_connection(ip, username) as net_connect:
             run_config = net_connect.send_command("show running-config")
-            return hashlib.md5(run_config.encode('utf-8')).hexdigest()
+            return hashlib.md5(run_config.encode('utf-8')).hexdigest(), None
     except Exception as e:
-        return None
+        msg = format_connection_error(ip, username, e)
+        logger.warning("get_config_hash failed for %s: %s", ip, msg)
+        return None, msg
+
 
 def get_switch_data(ip, username):
-    data = {'vlans': [], 'interfaces': [], 'hash': None}
+    data = {'vlans': [], 'interfaces': [], 'hash': None, 'error': None}
     try:
         with get_connection(ip, username) as net_connect:
             # Get Hash
@@ -59,9 +108,17 @@ def get_switch_data(ip, username):
                     'access_vlan': access_vlan,
                     'trunk_vlans': trunk_vlans
                 })
+    except json.JSONDecodeError as e:
+        data['error'] = (
+            f"SSH to {ip} worked, but switch output was not valid JSON (position {e.pos}). "
+            "The device may not be Arista EOS or CLI output may have changed."
+        )
+        logger.warning("get_switch_data JSON error for %s: %s", ip, data['error'])
     except Exception as e:
-        print(f"Error connecting to {ip}: {e}")
+        data['error'] = format_connection_error(ip, username, e)
+        logger.warning("get_switch_data failed for %s: %s", ip, data['error'])
     return data
+
 
 def push_switch_config(ip, username, interface, description, mode, selected_vlans):
     try:
@@ -85,10 +142,18 @@ def push_switch_config(ip, username, interface, description, mode, selected_vlan
 
             net_connect.send_config_set(commands)
             net_connect.send_command("write memory")
-            return True
+            return True, None
+    except json.JSONDecodeError as e:
+        msg = (
+            f"SSH to {ip} worked, but could not parse command output as JSON (position {e.pos})."
+        )
+        logger.warning("push_switch_config JSON error for %s: %s", ip, msg)
+        return False, msg
     except Exception as e:
-        print(f"Error pushing config to {ip}: {e}")
-        return False
+        msg = format_connection_error(ip, username, e)
+        logger.warning("push_switch_config failed for %s: %s", ip, msg)
+        return False, msg
+
 
 def get_arp_table(ip, username):
     """Fetches the ARP table from the Arista switch."""
@@ -97,7 +162,14 @@ def get_arp_table(ip, username):
             arp_out = net_connect.send_command("show arp | json")
             arp_json = json.loads(arp_out)
             # Arista stores ARP entries under 'ipv4Neighbors'
-            return arp_json.get('ipv4Neighbors', [])
+            return arp_json.get('ipv4Neighbors', []), None
+    except json.JSONDecodeError as e:
+        msg = (
+            f"SSH to {ip} worked, but ARP output was not valid JSON (position {e.pos})."
+        )
+        logger.warning("get_arp_table JSON error for %s: %s", ip, msg)
+        return [], msg
     except Exception as e:
-        print(f"Error fetching ARP table from {ip}: {e}")
-        return []
+        msg = format_connection_error(ip, username, e)
+        logger.warning("get_arp_table failed for %s: %s", ip, msg)
+        return [], msg

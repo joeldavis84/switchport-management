@@ -41,25 +41,35 @@ def update_switch(id):
     else:
         vlans = request.form.getlist('trunk_vlans')
 
-    success = push_switch_config(switch.ip_address, switch.username, interface, description, mode, vlans)
-    
+    success, err_detail = push_switch_config(
+        switch.ip_address, switch.username, interface, description, mode, vlans
+    )
+
     if success:
         flash(f"Successfully updated {interface} and saved to startup-config.", "success")
     else:
-        flash(f"Failed to update {interface}.", "danger")
+        flash(f"Failed to update {interface}. {err_detail}", "danger")
         
     return redirect(url_for('switches.manage_switch', id=switch.id))
 
 @switches_bp.route('/api/hash/<int:id>')
 def check_hash(id):
     switch = Switch.query.get_or_404(id)
-    current_hash = get_config_hash(switch.ip_address, switch.username)
-    return jsonify({'hash': current_hash})
+    current_hash, err = get_config_hash(switch.ip_address, switch.username)
+    payload = {'hash': current_hash}
+    if err:
+        payload['error'] = err
+    return jsonify(payload)
 
 @switches_bp.route('/manage/<int:id>/arp', methods=['GET'])
 def arp_table(id):
     switch = Switch.query.get_or_404(id)
-    arp_data = get_arp_table(switch.ip_address, switch.username)
-    return render_template('arp_table.html', switch=switch, arp_data=arp_data)
+    arp_data, connection_error = get_arp_table(switch.ip_address, switch.username)
+    return render_template(
+        'arp_table.html',
+        switch=switch,
+        arp_data=arp_data,
+        connection_error=connection_error,
+    )
 
 

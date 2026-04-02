@@ -9,7 +9,7 @@
 <hr>
 
 {% if not data.hash %}
-    <div class="alert alert-danger">Could not connect to the switch or parse data.</div>
+    <div class="alert alert-danger">{{ data.error or "Could not load switch data (no error detail was recorded)." }}</div>
 {% else %}
     <form method="POST" action="{{ url_for('switches.update_switch', id=switch.id) }}" id="configForm">
         <div class="mb-3">
