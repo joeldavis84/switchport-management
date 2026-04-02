@@ -49,14 +49,13 @@ def format_connection_error(host: str, username: str, exc: BaseException) -> str
 
 
 def get_connection(ip, username):
-    # netmiko automatically looks in ~/.ssh/ if use_keys=True
+    # use_keys=True makes netmiko pass look_for_keys to Paramiko internally; it is not a ConnectHandler kwarg.
     return ConnectHandler(
         device_type='arista_eos',
         host=ip,
         username=username,
         use_keys=True,
-        look_for_keys=True,
-        allow_agent=True
+        allow_agent=True,
     )
 
 def get_config_hash(ip, username):
