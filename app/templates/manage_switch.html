@@ -2,7 +2,7 @@
 {% block content %}
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2>Manage Switch: {{ switch.ip_address }}</h2>
+    <h2>ARP Table: {{ switch.description }} ({{ switch.ip_address }})</h2>
     <a href="{{ url_for('switches.arp_table', id=switch.id) }}" class="btn btn-info">View ARP Table</a>
 </div>
 
@@ -22,7 +22,7 @@
                         data-mode="{{ intf.mode }}" 
                         data-access="{{ intf.access_vlan }}" 
                         data-trunk="{{ intf.trunk_vlans }}">
-                    {{ intf.name }} (Mode: {{ intf.mode }})
+		{{ intf.name }} ({{ intf.description }})
                 </option>
                 {% endfor %}
             </select>

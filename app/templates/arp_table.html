@@ -1,7 +1,9 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2>ARP Table: {{ switch.ip_address }}</h2>
+
+    <h2>ARP Table: {{ switch.description }} ({{ switch.ip_address }})</h2>
+
     <a href="{{ url_for('switches.manage_switch', id=switch.id) }}" class="btn btn-secondary">Back to Manage</a>
 </div>
 <hr>
