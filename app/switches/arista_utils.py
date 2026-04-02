@@ -55,6 +55,7 @@ def get_connection(ip, username):
         host=ip,
         username=username,
         use_keys=True,
+        key_file="/root/.ssh/id_rsa",
         allow_agent=True,
     )
 
@@ -161,7 +162,7 @@ def get_arp_table(ip, username):
             arp_out = net_connect.send_command("show arp | json")
             arp_json = json.loads(arp_out)
             # Arista stores ARP entries under 'ipv4Neighbors'
-            return arp_json.get('ipv4Neighbors', []), None
+            return arp_json.get('ipV4Neighbors', []), None
     except json.JSONDecodeError as e:
         msg = (
             f"SSH to {ip} worked, but ARP output was not valid JSON (position {e.pos})."
