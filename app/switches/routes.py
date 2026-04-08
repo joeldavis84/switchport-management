@@ -1,4 +1,4 @@
-from flask import render_template, request, redirect, url_for, flash, jsonify
+from flask import abort, flash, jsonify, redirect, render_template, request, url_for
 from app import db
 from app.models import Switch
 from . import switches_bp
@@ -88,5 +88,24 @@ def vlan_table(id):
         switch=switch,
         vlans=vlans,
         connection_error=connection_error,
+    )
+
+
+@switches_bp.route('/manage/<int:id>/vlans/<int:vlan_id>', methods=['GET'])
+def vlan_detail(id, vlan_id):
+    if vlan_id < 1 or vlan_id > 4094:
+        abort(404)
+    switch = Switch.query.get_or_404(id)
+    payload, err, not_found = get_vlan_detail(
+        switch.ip_address, switch.username, vlan_id
+    )
+    if not_found:
+        abort(404)
+    return render_template(
+        'vlan_detail.html',
+        switch=switch,
+        vlan_id=vlan_id,
+        detail=payload,
+        connection_error=err,
     )
 

@@ -8,7 +8,7 @@
     </div>
 </div>
 
-<p class="text-muted">Configured VLANs from <code>show vlan</code> (read-only).</p>
+<p class="text-muted">Configured VLANs from <code>show vlan</code> (read-only). <span class="text-success">&#10003;</span> active, <span class="text-danger">&#10007;</span> suspended.</p>
 <hr>
 
 {% if connection_error %}
@@ -19,21 +19,31 @@
     <table class="table table-striped table-hover table-bordered">
         <thead class="table-dark">
             <tr>
-                <th>VLAN ID</th>
-                <th>Name</th>
-                <th>Status</th>
+                <th scope="col" class="text-center" title="Active vs suspended"> </th>
+                <th scope="col">VLAN ID</th>
+                <th scope="col">Name</th>
+                <th scope="col">Description</th>
             </tr>
         </thead>
         <tbody>
             {% for v in vlans %}
             <tr>
-                <td>{{ v.id }}</td>
-                <td>{{ v.name if v.name else '—' }}</td>
-                <td>{{ v.status if v.status else '—' }}</td>
+                <td class="text-center align-middle">
+                    {% if v.disabled %}
+                    <span class="text-danger fs-5" title="Suspended / not forwarding" aria-label="Suspended">&#10007;</span>
+                    {% else %}
+                    <span class="text-success fs-5" title="Active" aria-label="Active">&#10003;</span>
+                    {% endif %}
+                </td>
+                <td class="align-middle">
+                    <a href="{{ url_for('switches.vlan_detail', id=switch.id, vlan_id=v.id|int) }}">{{ v.id }}</a>
+                </td>
+                <td class="align-middle">{{ v.name if v.name else '—' }}</td>
+                <td class="align-middle">{{ v.description if v.description else '—' }}</td>
             </tr>
             {% else %}
             <tr>
-                <td colspan="3" class="text-center text-muted">
+                <td colspan="4" class="text-center text-muted">
                     {% if connection_error %}Unable to load VLAN data (see message above).{% else %}No VLANs reported by the switch.{% endif %}
                 </td>
             </tr>

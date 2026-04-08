@@ -2,6 +2,7 @@ import errno
 import hashlib
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import paramiko
@@ -206,6 +207,118 @@ def _vlan_sort_key(row: Dict[str, Any]) -> int:
         return 0
 
 
+def _vlan_disabled(v_info: Dict[str, Any]) -> bool:
+    """True if VLAN is suspended / not forwarding (red X in UI)."""
+    st = str(v_info.get("status") or "").lower()
+    if "suspend" in st or "inactive" in st:
+        return True
+    if v_info.get("suspended") is True:
+        return True
+    state = str(v_info.get("state") or "").lower()
+    if "suspend" in state:
+        return True
+    return False
+
+
+def _vlan_description_field(v_info: Dict[str, Any]) -> str:
+    """EOS may expose description separately from name (varies by version)."""
+    for key in ("description", "vlanDescription", "comment"):
+        val = v_info.get(key)
+        if val is None:
+            continue
+        if isinstance(val, str):
+            s = val.strip()
+            if s:
+                return s
+    return ""
+
+
+def extract_vlan_running_config_stanza(run_config: str, vlan_id: str) -> str:
+    """Return the running-config lines for a single `vlan <id>` stanza (best-effort)."""
+    vid = re.escape(str(vlan_id))
+    pat = re.compile(rf"^vlan\s+{vid}\s*$", re.MULTILINE)
+    m = pat.search(run_config)
+    if not m:
+        return ""
+    block_lines = run_config[m.start() :].splitlines()
+    if not block_lines:
+        return ""
+    out: List[str] = [block_lines[0]]
+    for line in block_lines[1:]:
+        stripped = line.strip()
+        if stripped == "!":
+            out.append(line)
+            break
+        if not stripped:
+            out.append(line)
+            continue
+        if line[0] not in " \t":
+            break
+        out.append(line)
+    return "\n".join(out).rstrip()
+
+
+def _interface_names_from_vlan_json(v_info: Dict[str, Any]) -> List[str]:
+    ifaces = v_info.get("interfaces")
+    if isinstance(ifaces, dict):
+        return sorted(ifaces.keys())
+    if isinstance(ifaces, list):
+        return sorted(str(x) for x in ifaces)
+    return []
+
+
+def _trunk_spec_includes_vlan(spec: str, vid: int) -> bool:
+    """Best-effort parse of EOS trunk allowed VLAN list (e.g. 10,20,30-40,1-4094)."""
+    spec = spec.strip().lower()
+    if spec in ("", "none"):
+        return False
+    if spec in ("1-4094", "all"):
+        return True
+    for part in spec.replace(" ", "").split(","):
+        if not part:
+            continue
+        if "-" in part:
+            lo_s, hi_s = part.split("-", 1)
+            try:
+                lo, hi = int(lo_s), int(hi_s)
+                if lo <= vid <= hi:
+                    return True
+            except ValueError:
+                continue
+        else:
+            try:
+                if int(part) == vid:
+                    return True
+            except ValueError:
+                continue
+    return False
+
+
+def _fallback_interfaces_for_vlan(sw_json: Dict[str, Any], vlan_id: int) -> List[str]:
+    """When show vlan omits interface keys, infer ports from switchport JSON."""
+    vid = int(vlan_id)
+    switchports = sw_json.get("switchports") or {}
+    found: List[str] = []
+    for if_name, data in switchports.items():
+        n = str(if_name)
+        if not (n.startswith("Ethernet") or n.startswith("Port-Channel")):
+            continue
+        sp = (data or {}).get("switchportInfo") or {}
+        mode = str(sp.get("mode") or "").lower()
+        if mode == "access":
+            av = sp.get("accessVlanId")
+            try:
+                if av is not None and int(av) == vid:
+                    found.append(str(if_name))
+            except (TypeError, ValueError):
+                continue
+        elif mode == "trunk":
+            raw = sp.get("trunkAllowedVlans")
+            if raw is not None and _trunk_spec_includes_vlan(str(raw), vid):
+                found.append(str(if_name))
+    return sorted(found)
+
+
 def get_vlan_table(ip: str, username: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """Read configured VLANs from the switch (show vlan | json)."""
     try:
@@ -219,12 +332,11 @@ def get_vlan_table(ip: str, username: str) -> Tuple[List[Dict[str, Any]], Option
                 name = v_info.get("name") or ""
                 if isinstance(name, str):
                     name = name.strip()
-                st = v_info.get("status")
-                status = str(st).strip() if st is not None else ""
                 row: Dict[str, Any] = {
                     "id": str(v_id),
                     "name": name,
-                    "status": status,
+                    "description": _vlan_description_field(v_info),
+                    "disabled": _vlan_disabled(v_info),
                 }
                 rows.append(row)
             rows.sort(key=_vlan_sort_key)
@@ -239,3 +351,77 @@ def get_vlan_table(ip: str, username: str) -> Tuple[List[Dict[str, Any]], Option
         msg = format_connection_error(ip, username, e)
         logger.warning("get_vlan_table failed for %s: %s", ip, msg)
         return [], msg
+
+
+def get_vlan_detail(
+    ip: str, username: str, vlan_id: int
+) -> Tuple[Optional[Dict[str, Any]], Optional[str], bool]:
+    """
+    Running-config stanza for vlan_id, plus ports using that VLAN (from show vlan + switchport).
+
+    Returns (payload, error, not_found). payload is set only on success.
+    """
+    vid_str = str(vlan_id)
+    try:
+        with get_connection(ip, username) as net_connect:
+            run_cfg = net_connect.send_command("show running-config")
+            vlan_out = net_connect.send_command("show vlan | json")
+            vlan_json = json.loads(vlan_out)
+            sw_out = net_connect.send_command("show interfaces switchport | json")
+            sw_json = json.loads(sw_out)
+
+            vlans = vlan_json.get("vlans") or {}
+            v_info = vlans.get(vid_str)
+            if v_info is None and vid_str.isdigit():
+                v_info = vlans.get(str(int(vid_str)))
+            if not isinstance(v_info, dict):
+                return None, None, True
+
+            stanza = extract_vlan_running_config_stanza(run_cfg, vid_str)
+            if not stanza:
+                stanza = (
+                    f"(No matching `vlan {vid_str}` block was found in running-config; "
+                    "VLAN may be internally provisioned. Summary below is from operational data.)"
+                )
+
+            switchports = sw_json.get("switchports") or {}
+            if_names = sorted(
+                set(_interface_names_from_vlan_json(v_info))
+                | set(_fallback_interfaces_for_vlan(sw_json, vlan_id))
+            )
+
+            port_rows: List[Dict[str, Any]] = []
+            for if_name in if_names:
+                sp = switchports.get(if_name, {}).get("switchportInfo") or {}
+                mode = str(sp.get("mode") or "").lower() or "—"
+                access_vlan = str(sp.get("accessVlanId", "")) if sp.get("accessVlanId") is not None else ""
+                trunk_raw = sp.get("trunkAllowedVlans")
+                trunk_vlans = str(trunk_raw).strip() if trunk_raw is not None else ""
+                port_rows.append(
+                    {
+                        "name": if_name,
+                        "mode": mode,
+                        "access_vlan": access_vlan,
+                        "trunk_allowed_vlans": trunk_vlans,
+                    }
+                )
+
+            payload = {
+                "vlan_id": vid_str,
+                "name": (v_info.get("name") or "").strip() if isinstance(v_info.get("name"), str) else "",
+                "description": _vlan_description_field(v_info),
+                "disabled": _vlan_disabled(v_info),
+                "running_config": stanza,
+                "ports": port_rows,
+            }
+            return payload, None, False
+    except json.JSONDecodeError as e:
+        msg = (
+            f"SSH to {ip} worked, but command output was not valid JSON (position {e.pos})."
+        )
+        logger.warning("get_vlan_detail JSON error for %s vlan %s: %s", ip, vlan_id, msg)
+        return None, msg, False
+    except Exception as e:
+        msg = format_connection_error(ip, username, e)
+        logger.warning("get_vlan_detail failed for %s vlan %s: %s", ip, vlan_id, msg)
+        return None, msg, False
