@@ -232,12 +232,18 @@ def _vlan_description_field(v_info: Dict[str, Any]) -> str:
     return ""
 
 
+def _vlan_detail_skip_interface(if_name: str) -> bool:
+    """True for internal EOS interfaces that should not appear on the VLAN ports table."""
+    n = str(if_name).strip().lower()
+    return n == "cpu"
+
+
 def _interface_names_from_vlan_json(v_info: Dict[str, Any]) -> List[str]:
     ifaces = v_info.get("interfaces")
     if isinstance(ifaces, dict):
-        return sorted(ifaces.keys())
+        return sorted(k for k in ifaces.keys() if not _vlan_detail_skip_interface(k))
     if isinstance(ifaces, list):
-        return sorted(str(x) for x in ifaces)
+        return sorted(str(x) for x in ifaces if not _vlan_detail_skip_interface(str(x)))
     return []
 
 
@@ -355,8 +361,12 @@ def get_vlan_detail(
 
             switchports = sw_json.get("switchports") or {}
             if_names = sorted(
-                set(_interface_names_from_vlan_json(v_info))
-                | set(_fallback_interfaces_for_vlan(sw_json, vlan_id))
+                n
+                for n in (
+                    set(_interface_names_from_vlan_json(v_info))
+                    | set(_fallback_interfaces_for_vlan(sw_json, vlan_id))
+                )
+                if not _vlan_detail_skip_interface(n)
             )
 
             port_rows: List[Dict[str, Any]] = []
