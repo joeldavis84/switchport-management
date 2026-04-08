@@ -2,12 +2,33 @@ import errno
 import hashlib
 import json
 import logging
+from typing import Optional
 
 import paramiko
 from netmiko import ConnectHandler
 from netmiko.exceptions import NetmikoAuthenticationException, NetmikoTimeoutException
 
 logger = logging.getLogger(__name__)
+
+# Netmiko disables cmd_verify for any command matching this pattern (see send_config_set).
+# Include description lines: EOS echo can differ from what we sent (spacing/quotes), which
+# would break echo verification while the config still applies.
+_CONFIG_SET_BYPASS = r"^(banner .*|description .*)$"
+
+
+def normalize_port_description(text: Optional[str]) -> str:
+    """
+    Strip one pair of matching outer ASCII quotes from a port description.
+
+    EOS JSON and copy-paste from `show run` sometimes carry CLI-style wrapping quotes.
+    Sending `description "foo"` stores quote characters on the port; we send `description foo`.
+    """
+    if not text:
+        return ""
+    s = text.strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
+        return s[1:-1].strip()
+    return s
 
 
 def format_connection_error(host: str, username: str, exc: BaseException) -> str:
@@ -103,7 +124,7 @@ def get_switch_data(ip, username):
 
                 data['interfaces'].append({
                     'name': intf_name,
-                    'description': intf_info.get('description', ''),
+                    'description': normalize_port_description(intf_info.get('description') or ''),
                     'mode': mode,
                     'access_vlan': access_vlan,
                     'trunk_vlans': trunk_vlans
@@ -125,9 +146,11 @@ def push_switch_config(ip, username, interface, description, mode, selected_vlan
         with get_connection(ip, username) as net_connect:
             net_connect.enable()
             commands = [f"interface {interface}"]
-            
-            if description:
-                commands.append(f"description {description}")
+            desc = normalize_port_description(description)
+
+            if desc:
+                # One line: everything after the first space is the description text (EOS CLI).
+                commands.append(f"description {desc}")
             else:
                 commands.append("no description")
 
@@ -140,7 +163,7 @@ def push_switch_config(ip, username, interface, description, mode, selected_vlan
                 vlan_str = ",".join(selected_vlans) if selected_vlans else "none"
                 commands.append(f"switchport trunk allowed vlan {vlan_str}")
 
-            net_connect.send_config_set(commands)
+            net_connect.send_config_set(commands, bypass_commands=_CONFIG_SET_BYPASS)
             net_connect.send_command("write memory")
             return True, None
     except json.JSONDecodeError as e:
