@@ -369,6 +369,9 @@ def get_vlan_detail(
             vlan_json = json.loads(vlan_out)
             sw_out = net_connect.send_command("show interfaces switchport | json")
             sw_json = json.loads(sw_out)
+            intf_out = net_connect.send_command("show interfaces | json")
+            intf_json = json.loads(intf_out)
+            interfaces_map = intf_json.get("interfaces") or {}
 
             vlans = vlan_json.get("vlans") or {}
             v_info = vlans.get(vid_str)
@@ -394,15 +397,21 @@ def get_vlan_detail(
             for if_name in if_names:
                 sp = switchports.get(if_name, {}).get("switchportInfo") or {}
                 mode = str(sp.get("mode") or "").lower() or "—"
-                access_vlan = str(sp.get("accessVlanId", "")) if sp.get("accessVlanId") is not None else ""
+                raw_if_desc = (interfaces_map.get(if_name) or {}).get("description")
+                if raw_if_desc is None:
+                    raw_if_desc = ""
+                elif not isinstance(raw_if_desc, str):
+                    raw_if_desc = str(raw_if_desc)
+                if_desc = normalize_port_description(raw_if_desc)
                 trunk_raw = sp.get("trunkAllowedVlans")
                 trunk_vlans = str(trunk_raw).strip() if trunk_raw is not None else ""
+                additional = trunk_vlans if mode == "trunk" else ""
                 port_rows.append(
                     {
                         "name": if_name,
+                        "description": if_desc,
                         "mode": mode,
-                        "access_vlan": access_vlan,
-                        "trunk_allowed_vlans": trunk_vlans,
+                        "additional_info": additional,
                     }
                 )
 

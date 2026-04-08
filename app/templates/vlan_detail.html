@@ -40,25 +40,25 @@
 <pre class="bg-light p-3 border rounded font-monospace small mb-4" style="white-space: pre-wrap;">{{ detail.running_config }}</pre>
 
 <h3 class="h5">Switch ports using this VLAN</h3>
-<p class="text-muted small">Interfaces from <code>show vlan</code> (with switchport mode and VLAN fields from <code>show interfaces switchport</code>). If the VLAN list omits interfaces, ports are inferred from switchport configuration.</p>
+<p class="text-muted small">Interfaces from <code>show vlan</code> with mode from <code>show interfaces switchport</code>, descriptions from <code>show interfaces</code>. <em>Additional information</em> lists allowed VLANs only for trunk ports.</p>
 
 <div class="table-responsive">
     <table class="table table-striped table-hover table-bordered">
         <thead class="table-dark">
             <tr>
                 <th>Interface</th>
+                <th>Description</th>
                 <th>Mode</th>
-                <th>Access VLAN</th>
-                <th>Trunk allowed VLANs</th>
+                <th>Additional information</th>
             </tr>
         </thead>
         <tbody>
             {% for p in detail.ports %}
             <tr>
                 <td>{{ p.name }}</td>
+                <td>{{ p.description if p.description else '—' }}</td>
                 <td>{{ p.mode }}</td>
-                <td>{{ p.access_vlan if p.access_vlan else '—' }}</td>
-                <td class="font-monospace small">{{ p.trunk_allowed_vlans if p.trunk_allowed_vlans else '—' }}</td>
+                <td class="font-monospace small">{% if p.mode == 'trunk' and p.additional_info %}{{ p.additional_info }}{% else %}—{% endif %}</td>
             </tr>
             {% else %}
             <tr>
