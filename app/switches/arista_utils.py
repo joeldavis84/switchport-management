@@ -2,7 +2,7 @@ import errno
 import hashlib
 import json
 import logging
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import paramiko
 from netmiko import ConnectHandler
@@ -195,4 +195,47 @@ def get_arp_table(ip, username):
     except Exception as e:
         msg = format_connection_error(ip, username, e)
         logger.warning("get_arp_table failed for %s: %s", ip, msg)
+        return [], msg
+
+
+def _vlan_sort_key(row: Dict[str, Any]) -> int:
+    vid = row.get("id", "0")
+    try:
+        return int(str(vid).split("-", 1)[0])
+    except ValueError:
+        return 0
+
+
+def get_vlan_table(ip: str, username: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Read configured VLANs from the switch (show vlan | json)."""
+    try:
+        with get_connection(ip, username) as net_connect:
+            vlan_out = net_connect.send_command("show vlan | json")
+            vlan_json = json.loads(vlan_out)
+            rows: List[Dict[str, Any]] = []
+            for v_id, v_info in vlan_json.get("vlans", {}).items():
+                if not isinstance(v_info, dict):
+                    continue
+                name = v_info.get("name") or ""
+                if isinstance(name, str):
+                    name = name.strip()
+                st = v_info.get("status")
+                status = str(st).strip() if st is not None else ""
+                row: Dict[str, Any] = {
+                    "id": str(v_id),
+                    "name": name,
+                    "status": status,
+                }
+                rows.append(row)
+            rows.sort(key=_vlan_sort_key)
+            return rows, None
+    except json.JSONDecodeError as e:
+        msg = (
+            f"SSH to {ip} worked, but VLAN output was not valid JSON (position {e.pos})."
+        )
+        logger.warning("get_vlan_table JSON error for %s: %s", ip, msg)
+        return [], msg
+    except Exception as e:
+        msg = format_connection_error(ip, username, e)
+        logger.warning("get_vlan_table failed for %s: %s", ip, msg)
         return [], msg

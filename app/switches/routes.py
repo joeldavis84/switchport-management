@@ -2,7 +2,13 @@ from flask import render_template, request, redirect, url_for, flash, jsonify
 from app import db
 from app.models import Switch
 from . import switches_bp
-from .arista_utils import get_switch_data, push_switch_config, get_config_hash, get_arp_table
+from .arista_utils import (
+    get_arp_table,
+    get_config_hash,
+    get_switch_data,
+    get_vlan_table,
+    push_switch_config,
+)
 
 @switches_bp.route('/')
 def index():
@@ -72,4 +78,15 @@ def arp_table(id):
         connection_error=connection_error,
     )
 
+
+@switches_bp.route('/manage/<int:id>/vlans', methods=['GET'])
+def vlan_table(id):
+    switch = Switch.query.get_or_404(id)
+    vlans, connection_error = get_vlan_table(switch.ip_address, switch.username)
+    return render_template(
+        'vlan_table.html',
+        switch=switch,
+        vlans=vlans,
+        connection_error=connection_error,
+    )
 

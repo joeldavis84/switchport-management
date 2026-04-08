@@ -1,12 +1,14 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-    <h2 class="mb-0">ARP table: {{ switch.description }} ({{ switch.ip_address }})</h2>
+    <h2 class="mb-0">VLANs: {{ switch.description }} ({{ switch.ip_address }})</h2>
     <div class="btn-group" role="group" aria-label="Navigation">
         <a href="{{ url_for('switches.manage_switch', id=switch.id) }}" class="btn btn-secondary">Back to Manage</a>
-        <a href="{{ url_for('switches.vlan_table', id=switch.id) }}" class="btn btn-outline-secondary">View VLANs</a>
+        <a href="{{ url_for('switches.arp_table', id=switch.id) }}" class="btn btn-outline-info">View ARP table</a>
     </div>
 </div>
+
+<p class="text-muted">Configured VLANs from <code>show vlan</code> (read-only).</p>
 <hr>
 
 {% if connection_error %}
@@ -17,24 +19,22 @@
     <table class="table table-striped table-hover table-bordered">
         <thead class="table-dark">
             <tr>
-                <th>IP Address</th>
-                <th>MAC Address</th>
-                <th>Interface</th>
-                <th>Age (Seconds)</th>
+                <th>VLAN ID</th>
+                <th>Name</th>
+                <th>Status</th>
             </tr>
         </thead>
         <tbody>
-            {% for entry in arp_data %}
+            {% for v in vlans %}
             <tr>
-                <td>{{ entry.address }}</td>
-                <td>{{ entry.hwAddress }}</td>
-                <td>{{ entry.interface }}</td>
-                <td>{{ entry.age }}</td>
+                <td>{{ v.id }}</td>
+                <td>{{ v.name if v.name else '—' }}</td>
+                <td>{{ v.status if v.status else '—' }}</td>
             </tr>
             {% else %}
             <tr>
-                <td colspan="4" class="text-center text-muted">
-                    {% if connection_error %}Unable to load ARP data (see message above).{% else %}No ARP entries found.{% endif %}
+                <td colspan="3" class="text-center text-muted">
+                    {% if connection_error %}Unable to load VLAN data (see message above).{% else %}No VLANs reported by the switch.{% endif %}
                 </td>
             </tr>
             {% endfor %}
