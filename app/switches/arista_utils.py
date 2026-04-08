@@ -255,12 +255,10 @@ def _vlan_line_includes_id(line: str, vid: int) -> bool:
     return False
 
 
-def extract_vlan_running_config_stanza(run_config: str, vlan_id: str) -> str:
-    """Return the running-config lines for the `vlan ...` stanza that includes this id (best-effort)."""
-    try:
-        vid = int(str(vlan_id).strip())
-    except ValueError:
-        return ""
+def _extract_vlan_stanza_one_pass(
+    run_config: str, vid: int, require_col0_header: bool
+) -> str:
+    """Find a `vlan ...` header line including vid, then collect indented subcommands."""
     text = run_config.lstrip("\ufeff")
     lines = text.splitlines()
     start_idx: Optional[int] = None
@@ -268,11 +266,13 @@ def extract_vlan_running_config_stanza(run_config: str, vlan_id: str) -> str:
         line = raw.rstrip("\r")
         if not line.strip():
             continue
-        if line[0] in " \t":
+        if require_col0_header and line[0] in " \t":
             continue
-        if _vlan_line_includes_id(line, vid):
-            start_idx = i
-            break
+        check_line = line if require_col0_header else line.strip()
+        if not _vlan_line_includes_id(check_line, vid):
+            continue
+        start_idx = i
+        break
     if start_idx is None:
         return ""
     block_lines = lines[start_idx:]
@@ -289,6 +289,126 @@ def extract_vlan_running_config_stanza(run_config: str, vlan_id: str) -> str:
             break
         out.append(line)
     return "\n".join(out).rstrip()
+
+
+def extract_vlan_running_config_stanza(run_config: str, vlan_id: str) -> str:
+    """Return the running-config lines for the `vlan ...` stanza that includes this id (best-effort)."""
+    try:
+        vid = int(str(vlan_id).strip())
+    except ValueError:
+        return ""
+    for require_col0 in (True, False):
+        stanza = _extract_vlan_stanza_one_pass(run_config, vid, require_col0)
+        if stanza:
+            return stanza
+    return ""
+
+
+def _running_config_line_references_vlan(line: str, vid: int) -> bool:
+    """True if this running-config line plausibly references VLAN id vid."""
+    v = str(vid)
+    li = line.strip()
+    low = li.lower()
+    if _vlan_line_includes_id(li, vid):
+        return True
+    if re.search(rf"^interface\s+vlan{v}\s*$", low, re.I):
+        return True
+    if re.search(rf"^interface\s+vlan\s+{v}\s*$", low, re.I):
+        return True
+    if re.search(rf"\bswitchport\s+access\s+vlan\s+{v}\b", low):
+        return True
+    if re.search(rf"\bswitchport\s+trunk\s+native\s+vlan\s+{v}\b", low):
+        return True
+    m = re.search(r"switchport\s+trunk\s+allowed\s+vlan\s+(.+)$", low)
+    if m:
+        spec = m.group(1).strip().rstrip("!")
+        if _trunk_spec_includes_vlan(spec, vid):
+            return True
+    return False
+
+
+def gather_vlan_running_config_snippets(run_config: str, vlan_id: int) -> str:
+    """Collect lines mentioning this VLAN when there is no `vlan` stanza (e.g. L2-only VLANs)."""
+    seen = set()
+    out_lines: List[str] = []
+    for raw in run_config.splitlines():
+        line = raw.rstrip("\r")
+        if not line.strip():
+            continue
+        if _running_config_line_references_vlan(line, vlan_id):
+            if line not in seen:
+                seen.add(line)
+                out_lines.append(line)
+    return "\n".join(out_lines)
+
+
+def _send_running_config_optional(net_connect: Any, command: str) -> str:
+    """Run a show command; return '' if EOS rejects it or output is useless."""
+    try:
+        out = net_connect.send_command(command, read_timeout=120)
+    except Exception as e:
+        logger.debug("optional running-config cmd failed: %s: %s", command, e)
+        return ""
+    if not out or not str(out).strip():
+        return ""
+    u = str(out).strip()
+    if "% Invalid" in u or "% Incomplete" in u or "% Error" in u:
+        return ""
+    return u
+
+
+def build_vlan_running_config_display(
+    net_connect: Any, run_cfg: str, vlan_id: int
+) -> str:
+    """
+    As much running-config text as we can find for this VLAN: L2 vlan stanza,
+    optional `show running-config all`, SVI block, then grep-style line matches.
+    """
+    vid_str = str(vlan_id)
+    parts: List[str] = []
+
+    stanza = extract_vlan_running_config_stanza(run_cfg, vid_str)
+    if stanza:
+        parts.append(stanza)
+
+    run_all = ""
+    if not stanza:
+        run_all = _send_running_config_optional(
+            net_connect, "show running-config all"
+        )
+        if run_all:
+            stanza = extract_vlan_running_config_stanza(run_all, vid_str)
+            if stanza:
+                parts.append(stanza)
+
+    svi = _send_running_config_optional(
+        net_connect, f"show running-config interface Vlan{vlan_id}"
+    )
+    if not svi:
+        svi = _send_running_config_optional(
+            net_connect, f"show running-config interfaces Vlan{vlan_id}"
+        )
+    if svi:
+        parts.append(svi)
+
+    if parts:
+        return "\n\n!\n\n".join(parts).strip()
+
+    snippets = gather_vlan_running_config_snippets(run_cfg, vlan_id)
+    if not snippets and run_all:
+        snippets = gather_vlan_running_config_snippets(run_all, vlan_id)
+    if snippets:
+        return (
+            f"No dedicated `vlan {vid_str}` block exists in running-config (common when the VLAN "
+            "only appears on switchports). Lines that reference this VLAN:\n\n"
+            + snippets
+        )
+
+    return (
+        f"No running-config text was found for VLAN {vid_str}. "
+        "The VLAN may exist only in the VLAN database with no matching `vlan` stanza, SVI, or "
+        "switchport lines in the retrieved configuration."
+    )
 
 
 def _interface_names_from_vlan_json(v_info: Dict[str, Any]) -> List[str]:
@@ -413,12 +533,9 @@ def get_vlan_detail(
             if not isinstance(v_info, dict):
                 return None, None, True
 
-            stanza = extract_vlan_running_config_stanza(run_cfg, vid_str)
-            if not stanza:
-                stanza = (
-                    f"(No matching `vlan {vid_str}` block was found in running-config; "
-                    "VLAN may be internally provisioned. Summary below is from operational data.)"
-                )
+            running_display = build_vlan_running_config_display(
+                net_connect, run_cfg, vlan_id
+            )
 
             switchports = sw_json.get("switchports") or {}
             if_names = sorted(
@@ -453,7 +570,7 @@ def get_vlan_detail(
                 "name": (v_info.get("name") or "").strip() if isinstance(v_info.get("name"), str) else "",
                 "description": _vlan_description_field(v_info),
                 "disabled": _vlan_disabled(v_info),
-                "running_config": stanza,
+                "running_config": running_display,
                 "ports": port_rows,
             }
             return payload, None, False

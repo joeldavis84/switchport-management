@@ -36,7 +36,7 @@
 {% elif detail %}
 
 <h3 class="h5">Running configuration</h3>
-<p class="text-muted small">Extracted <code>vlan {{ vlan_id }}</code> stanza from <code>show running-config</code> (best-effort).</p>
+<p class="text-muted small">Built from the L2 <code>vlan</code> stanza when present, optional <code>show running-config all</code>, any <code>interface Vlan{{ vlan_id }}</code> block, or matching lines from <code>show running-config</code> if the VLAN only exists on switchports.</p>
 <pre class="bg-light p-3 border rounded font-monospace small mb-4" style="white-space: pre-wrap;">{{ detail.running_config }}</pre>
 
 <h3 class="h5">Switch ports using this VLAN</h3>
