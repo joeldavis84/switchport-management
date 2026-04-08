@@ -233,16 +233,49 @@ def _vlan_description_field(v_info: Dict[str, Any]) -> str:
     return ""
 
 
+def _vlan_line_includes_id(line: str, vid: int) -> bool:
+    """
+    True if a top-level running-config `vlan ...` line applies to vlan id `vid`.
+
+    EOS often uses a single line for several IDs (e.g. `vlan 1,27,100` or `vlan 20-30`),
+    not only `vlan 27`.
+    """
+    s = line.rstrip("\r").strip()
+    if not s:
+        return False
+    # Pure ID list / ranges only (one line): vlan 27 | vlan 1,27 | vlan 20-30
+    m = re.match(r"^vlan\s+([\d,\-\s]+)\s*$", s, re.IGNORECASE)
+    if m:
+        spec = re.sub(r"\s+", "", m.group(1))
+        return _trunk_spec_includes_vlan(spec, vid)
+    # Same line may continue with subcommands, e.g. legacy "vlan 27 name Foo"
+    m2 = re.match(r"^vlan\s+(\d+)(?!\d)", s, re.IGNORECASE)
+    if m2:
+        return int(m2.group(1)) == vid
+    return False
+
+
 def extract_vlan_running_config_stanza(run_config: str, vlan_id: str) -> str:
-    """Return the running-config lines for a single `vlan <id>` stanza (best-effort)."""
-    vid = re.escape(str(vlan_id))
-    pat = re.compile(rf"^vlan\s+{vid}\s*$", re.MULTILINE)
-    m = pat.search(run_config)
-    if not m:
+    """Return the running-config lines for the `vlan ...` stanza that includes this id (best-effort)."""
+    try:
+        vid = int(str(vlan_id).strip())
+    except ValueError:
         return ""
-    block_lines = run_config[m.start() :].splitlines()
-    if not block_lines:
+    text = run_config.lstrip("\ufeff")
+    lines = text.splitlines()
+    start_idx: Optional[int] = None
+    for i, raw in enumerate(lines):
+        line = raw.rstrip("\r")
+        if not line.strip():
+            continue
+        if line[0] in " \t":
+            continue
+        if _vlan_line_includes_id(line, vid):
+            start_idx = i
+            break
+    if start_idx is None:
         return ""
+    block_lines = lines[start_idx:]
     out: List[str] = [block_lines[0]]
     for line in block_lines[1:]:
         stripped = line.strip()
