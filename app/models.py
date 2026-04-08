@@ -10,6 +10,17 @@ class Switch(db.Model):
     description = db.Column(db.String(200))
 
 
+class SwitchNote(db.Model):
+    """Local notes for a switch (application database only)."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    switch_id = db.Column(db.Integer, db.ForeignKey("switch.id"), nullable=False, index=True)
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.utcnow)
+
+    switch = db.relationship("Switch", backref=db.backref("switch_notes", lazy="dynamic"))
+
+
 class VlanNote(db.Model):
     """Local notes for a VLAN on a specific switch (application database only)."""
 
