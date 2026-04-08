@@ -35,7 +35,7 @@
 <p><a href="{{ url_for('switches.vlan_table', id=switch.id) }}" class="btn btn-outline-secondary">Back to VLAN list</a></p>
 {% elif detail %}
 
-<h3 class="h5">Switch ports using this VLAN</h3>
+<h3 class="h5">{{ detail.ports|length }} switch port{% if detail.ports|length != 1 %}s{% endif %} using this VLAN</h3>
 <p class="text-muted small">Interfaces from <code>show vlan</code> with mode from <code>show interfaces switchport</code>, descriptions from <code>show interfaces</code>. <em>Additional information</em> lists allowed VLANs only for trunk ports.</p>
 
 <div class="table-responsive">
