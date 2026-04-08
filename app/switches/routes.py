@@ -1,6 +1,6 @@
 from flask import abort, flash, jsonify, redirect, render_template, request, url_for
 from app import db
-from app.models import Switch
+from app.models import Switch, VlanNote
 from . import switches_bp
 from .arista_utils import (
     get_arp_table,
@@ -92,6 +92,14 @@ def vlan_table(id):
     )
 
 
+def _vlan_notes_for(switch_id: int, vlan_id: int):
+    return (
+        VlanNote.query.filter_by(switch_id=switch_id, vlan_id=vlan_id)
+        .order_by(VlanNote.created_at.asc())
+        .all()
+    )
+
+
 @switches_bp.route('/manage/<int:id>/vlans/<int:vlan_id>', methods=['GET'])
 def vlan_detail(id, vlan_id):
     if vlan_id < 1 or vlan_id > 4094:
@@ -102,11 +110,47 @@ def vlan_detail(id, vlan_id):
     )
     if not_found:
         abort(404)
+    notes = _vlan_notes_for(switch.id, vlan_id)
     return render_template(
         'vlan_detail.html',
         switch=switch,
         vlan_id=vlan_id,
         detail=payload,
         connection_error=err,
+        vlan_notes=notes,
     )
+
+
+@switches_bp.route('/manage/<int:id>/vlans/<int:vlan_id>/notes', methods=['POST'])
+def vlan_note_add(id, vlan_id):
+    if vlan_id < 1 or vlan_id > 4094:
+        abort(404)
+    switch = Switch.query.get_or_404(id)
+    body = (request.form.get('body') or '').strip()
+    if body:
+        db.session.add(
+            VlanNote(switch_id=switch.id, vlan_id=vlan_id, body=body)
+        )
+        db.session.commit()
+        flash("Note added.", "success")
+    else:
+        flash("Note text cannot be empty.", "warning")
+    return redirect(url_for('switches.vlan_detail', id=switch.id, vlan_id=vlan_id))
+
+
+@switches_bp.route(
+    '/manage/<int:id>/vlans/<int:vlan_id>/notes/<int:note_id>/delete',
+    methods=['POST'],
+)
+def vlan_note_delete(id, vlan_id, note_id):
+    if vlan_id < 1 or vlan_id > 4094:
+        abort(404)
+    switch = Switch.query.get_or_404(id)
+    note = VlanNote.query.get_or_404(note_id)
+    if note.switch_id != switch.id or note.vlan_id != vlan_id:
+        abort(404)
+    db.session.delete(note)
+    db.session.commit()
+    flash("Note removed.", "success")
+    return redirect(url_for('switches.vlan_detail', id=switch.id, vlan_id=vlan_id))
 

@@ -33,12 +33,13 @@
 {% if connection_error %}
 <div class="alert alert-danger">{{ connection_error }}</div>
 <p><a href="{{ url_for('switches.vlan_table', id=switch.id) }}" class="btn btn-outline-secondary">Back to VLAN list</a></p>
-{% elif detail %}
+{% endif %}
 
+{% if detail %}
 <h3 class="h5">{{ detail.ports|length }} switch port{% if detail.ports|length != 1 %}s{% endif %} using this VLAN</h3>
 <p class="text-muted small">Interfaces from <code>show vlan</code> with mode from <code>show interfaces switchport</code>, descriptions from <code>show interfaces</code>. <em>Additional information</em> lists allowed VLANs only for trunk ports.</p>
 
-<div class="table-responsive">
+<div class="table-responsive mb-4">
     <table class="table table-striped table-hover table-bordered">
         <thead class="table-dark">
             <tr>
@@ -65,4 +66,31 @@
     </table>
 </div>
 {% endif %}
+
+<h3 class="h5">Notes</h3>
+<p class="text-muted small">Stored in this application’s database for VLAN {{ vlan_id }} on this switch. Visible to anyone who can open this page.</p>
+
+<ul class="list-group mb-3">
+    {% for note in vlan_notes %}
+    <li class="list-group-item">
+        <div class="d-flex justify-content-between align-items-start gap-2">
+            <div class="flex-grow-1 min-w-0">
+                <div class="text-muted small mb-1">{{ note.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</div>
+                <div class="text-break" style="white-space: pre-wrap;">{{ note.body }}</div>
+            </div>
+            <form method="post" action="{{ url_for('switches.vlan_note_delete', id=switch.id, vlan_id=vlan_id, note_id=note.id) }}" class="flex-shrink-0">
+                <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+            </form>
+        </div>
+    </li>
+    {% else %}
+    <li class="list-group-item text-muted">No notes yet.</li>
+    {% endfor %}
+</ul>
+
+<form method="post" action="{{ url_for('switches.vlan_note_add', id=switch.id, vlan_id=vlan_id) }}" class="mb-3">
+    <label for="noteBody" class="form-label">Add a note</label>
+    <textarea class="form-control mb-2" id="noteBody" name="body" rows="3" placeholder="Enter text…"></textarea>
+    <button type="submit" class="btn btn-primary">Save note</button>
+</form>
 {% endblock %}
