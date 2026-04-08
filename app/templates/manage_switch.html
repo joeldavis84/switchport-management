@@ -70,6 +70,33 @@
     </form>
 {% endif %}
 
+<h3 class="h5 mt-4">Notes</h3>
+<p class="text-muted small">Stored in this application’s database for this switch. Visible to anyone who can open this page.</p>
+
+<ul class="list-group mb-3">
+    {% for note in switch_notes %}
+    <li class="list-group-item">
+        <div class="d-flex justify-content-between align-items-start gap-2">
+            <div class="flex-grow-1 min-w-0">
+                <div class="text-muted small mb-1">{{ note.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</div>
+                <div class="text-break" style="white-space: pre-wrap;">{{ note.body }}</div>
+            </div>
+            <form method="post" action="{{ url_for('switches.switch_note_delete', id=switch.id, note_id=note.id) }}" class="flex-shrink-0">
+                <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+            </form>
+        </div>
+    </li>
+    {% else %}
+    <li class="list-group-item text-muted">No notes yet.</li>
+    {% endfor %}
+</ul>
+
+<form method="post" action="{{ url_for('switches.switch_note_add', id=switch.id) }}" class="mb-3">
+    <label for="switchNoteBody" class="form-label">Add a note</label>
+    <textarea class="form-control mb-2" id="switchNoteBody" name="body" rows="3" placeholder="Enter text…"></textarea>
+    <button type="submit" class="btn btn-primary">Save note</button>
+</form>
+
 {% endblock %}
 
 {% block scripts %}

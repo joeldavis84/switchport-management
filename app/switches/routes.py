@@ -1,6 +1,6 @@
 from flask import abort, flash, jsonify, redirect, render_template, request, url_for
 from app import db
-from app.models import Switch, VlanNote
+from app.models import Switch, SwitchNote, VlanNote
 from . import switches_bp
 from .arista_utils import (
     get_arp_table,
@@ -30,11 +30,50 @@ def add_switch():
         
     return render_template('add_switch.html')
 
+def _switch_notes_for(switch_id: int):
+    return (
+        SwitchNote.query.filter_by(switch_id=switch_id)
+        .order_by(SwitchNote.created_at.asc())
+        .all()
+    )
+
+
 @switches_bp.route('/manage/<int:id>', methods=['GET'])
 def manage_switch(id):
     switch = Switch.query.get_or_404(id)
     data = get_switch_data(switch.ip_address, switch.username)
-    return render_template('manage_switch.html', switch=switch, data=data)
+    notes = _switch_notes_for(switch.id)
+    return render_template(
+        'manage_switch.html',
+        switch=switch,
+        data=data,
+        switch_notes=notes,
+    )
+
+
+@switches_bp.route('/manage/<int:id>/notes', methods=['POST'])
+def switch_note_add(id):
+    switch = Switch.query.get_or_404(id)
+    body = (request.form.get('body') or '').strip()
+    if body:
+        db.session.add(SwitchNote(switch_id=switch.id, body=body))
+        db.session.commit()
+        flash("Note added.", "success")
+    else:
+        flash("Note text cannot be empty.", "warning")
+    return redirect(url_for('switches.manage_switch', id=switch.id))
+
+
+@switches_bp.route('/manage/<int:id>/notes/<int:note_id>/delete', methods=['POST'])
+def switch_note_delete(id, note_id):
+    switch = Switch.query.get_or_404(id)
+    note = SwitchNote.query.get_or_404(note_id)
+    if note.switch_id != switch.id:
+        abort(404)
+    db.session.delete(note)
+    db.session.commit()
+    flash("Note removed.", "success")
+    return redirect(url_for('switches.manage_switch', id=switch.id))
 
 @switches_bp.route('/manage/<int:id>/update', methods=['POST'])
 def update_switch(id):
