@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h2 class="mb-0">
+            VLAN {{ vlan_id }}
+            {% if detail %}
+                {% if detail.disabled %}
+                <span class="text-danger fs-4 align-middle ms-1" title="Suspended / not forwarding" aria-label="Suspended">&#10007;</span>
+                {% else %}
+                <span class="text-success fs-4 align-middle ms-1" title="Active" aria-label="Active">&#10003;</span>
+                {% endif %}
+            {% endif %}
+            <span class="text-muted fs-6 fw-normal">— {{ switch.description }} ({{ switch.ip_address }})</span>
+        </h2>
+        {% if detail and detail.name %}
+        <p class="text-muted mb-0 small">Name: <strong>{{ detail.name }}</strong>
+            {% if detail.description %} · Description: <strong>{{ detail.description }}</strong>{% endif %}
+        </p>
+        {% elif detail and detail.description %}
+        <p class="text-muted mb-0 small">Description: <strong>{{ detail.description }}</strong></p>
+        {% endif %}
+    </div>
+    <div class="btn-group" role="group" aria-label="Navigation">
+        <a href="{{ url_for('switches.vlan_table', id=switch.id) }}" class="btn btn-secondary">All VLANs</a>
+        <a href="{{ url_for('switches.manage_switch', id=switch.id) }}" class="btn btn-outline-secondary">Manage switch</a>
+        <a href="{{ url_for('switches.arp_table', id=switch.id) }}" class="btn btn-outline-info">ARP table</a>
+    </div>
+</div>
+
+<hr>
+
+{% if connection_error %}
+<div class="alert alert-danger">{{ connection_error }}</div>
+<p><a href="{{ url_for('switches.vlan_table', id=switch.id) }}" class="btn btn-outline-secondary">Back to VLAN list</a></p>
+{% elif detail %}
+
+<h3 class="h5">Running configuration</h3>
+<p class="text-muted small">Extracted <code>vlan {{ vlan_id }}</code> stanza from <code>show running-config</code> (best-effort).</p>
+<pre class="bg-light p-3 border rounded font-monospace small mb-4" style="white-space: pre-wrap;">{{ detail.running_config }}</pre>
+
+<h3 class="h5">Switch ports using this VLAN</h3>
+<p class="text-muted small">Interfaces from <code>show vlan</code> (with switchport mode and VLAN fields from <code>show interfaces switchport</code>). If the VLAN list omits interfaces, ports are inferred from switchport configuration.</p>
+
+<div class="table-responsive">
+    <table class="table table-striped table-hover table-bordered">
+        <thead class="table-dark">
+            <tr>
+                <th>Interface</th>
+                <th>Mode</th>
+                <th>Access VLAN</th>
+                <th>Trunk allowed VLANs</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in detail.ports %}
+            <tr>
+                <td>{{ p.name }}</td>
+                <td>{{ p.mode }}</td>
+                <td>{{ p.access_vlan if p.access_vlan else '—' }}</td>
+                <td class="font-monospace small">{{ p.trunk_allowed_vlans if p.trunk_allowed_vlans else '—' }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4" class="text-center text-muted">No Ethernet switch ports reference this VLAN in operational data.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

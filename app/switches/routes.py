@@ -6,6 +6,7 @@ from .arista_utils import (
     get_arp_table,
     get_config_hash,
     get_switch_data,
+    get_vlan_detail,
     get_vlan_table,
     push_switch_config,
 )
