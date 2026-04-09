@@ -1,0 +1,88 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h2 class="mb-0">Logs: {{ switch.description }} ({{ switch.ip_address }})</h2>
+    <div class="btn-group" role="group" aria-label="Navigation">
+        <a href="{{ url_for('switches.manage_switch', id=switch.id) }}" class="btn btn-secondary">Back to Manage</a>
+        <a href="{{ url_for('switches.vlan_table', id=switch.id) }}" class="btn btn-outline-secondary">View VLANs</a>
+        <a href="{{ url_for('switches.arp_table', id=switch.id) }}" class="btn btn-outline-info">ARP table</a>
+    </div>
+</div>
+
+<p class="text-muted small mb-2">
+    Output from <code>show logging last {{ log_tail_lines }}</code>. This view refreshes every <strong>5 seconds</strong>; each refresh runs a new command on the switch and <strong>replaces</strong> the text below entirely.
+</p>
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <button type="button" class="btn btn-primary" id="copyLogBtn">Copy entire log to clipboard</button>
+    <span class="text-muted small" id="copyLogFeedback" aria-live="polite"></span>
+</div>
+
+<div id="logPollError" class="alert alert-danger{% if not initial_error %} d-none{% endif %}" role="alert">
+    {% if initial_error %}{{ initial_error }}{% endif %}
+</div>
+
+<pre id="switchLogPre" class="bg-dark text-light p-3 rounded border small mb-0" style="max-height: 70vh; overflow: auto; white-space: pre-wrap; word-break: break-word;">{% if not initial_error %}{{ initial_log }}{% endif %}</pre>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var pollUrl = {{ url_for('switches.switch_logs_poll', id=switch.id) | tojson }};
+    var pre = document.getElementById('switchLogPre');
+    var errEl = document.getElementById('logPollError');
+    var copyBtn = document.getElementById('copyLogBtn');
+    var copyFb = document.getElementById('copyLogFeedback');
+
+    function setError(msg) {
+        if (!msg) {
+            errEl.classList.add('d-none');
+            errEl.textContent = '';
+            return;
+        }
+        errEl.textContent = msg;
+        errEl.classList.remove('d-none');
+    }
+
+    function replaceLog(text) {
+        pre.textContent = text != null ? text : '';
+    }
+
+    function poll() {
+        fetch(pollUrl, { cache: 'no-store' })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.error) {
+                    replaceLog('');
+                    setError(data.error);
+                } else {
+                    setError('');
+                    replaceLog(data.log);
+                }
+            })
+            .catch(function () {
+                replaceLog('');
+                setError('Failed to refresh logs (network error).');
+            });
+    }
+
+    setInterval(poll, 5000);
+
+    copyBtn.addEventListener('click', function () {
+        var text = pre.textContent;
+        if (!text) {
+            copyFb.textContent = 'Nothing to copy.';
+            setTimeout(function () { copyFb.textContent = ''; }, 2500);
+            return;
+        }
+        navigator.clipboard.writeText(text).then(function () {
+            copyFb.textContent = 'Copied.';
+            setTimeout(function () { copyFb.textContent = ''; }, 2500);
+        }).catch(function () {
+            copyFb.textContent = 'Copy failed (clipboard permission?).';
+            setTimeout(function () { copyFb.textContent = ''; }, 4000);
+        });
+    });
+})();
+</script>
+{% endblock %}
