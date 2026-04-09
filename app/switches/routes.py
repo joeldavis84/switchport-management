@@ -77,42 +77,117 @@ def switch_note_delete(id, note_id):
     flash("Note removed.", "success")
     return redirect(url_for('switches.manage_switch', id=switch.id))
 
+def _json_switch_update_payload():
+    """Parse JSON body for async manage POSTs; returns dict or None if not JSON."""
+    if not request.is_json:
+        return None
+    body = request.get_json(silent=True)
+    return body if isinstance(body, dict) else None
+
+
 @switches_bp.route('/manage/<int:id>/update', methods=['POST'])
 def update_switch(id):
     switch = Switch.query.get_or_404(id)
-    interface = request.form.get('interface')
-    description = request.form.get('description')
-    mode = request.form.get('mode')
-    
-    if mode == 'access':
-        vlans = [request.form.get('access_vlan')]
+    json_body = _json_switch_update_payload()
+    if json_body is not None:
+        interface = (json_body.get("interface") or "").strip()
+        description = json_body.get("description")
+        mode = json_body.get("mode")
+        if mode == "access":
+            av = json_body.get("access_vlan")
+            vlans = [str(av)] if av is not None and str(av) != "" else []
+        elif mode == "trunk":
+            raw = json_body.get("trunk_vlans")
+            vlans = [str(x) for x in raw] if isinstance(raw, list) else []
+        else:
+            vlans = []
     else:
-        vlans = request.form.getlist('trunk_vlans')
+        interface = request.form.get("interface")
+        description = request.form.get("description")
+        mode = request.form.get("mode")
+        if mode == "access":
+            vlans = [request.form.get("access_vlan")]
+        else:
+            vlans = request.form.getlist("trunk_vlans")
+
+    if json_body is not None and (not interface or mode not in ("access", "trunk")):
+        return jsonify(
+            {"ok": False, "error": "Invalid interface or switchport mode."}
+        )
 
     success, err_detail = push_switch_config(
         switch.ip_address, switch.username, interface, description, mode, vlans
     )
 
+    if json_body is not None:
+        if success:
+            new_hash, _ = get_config_hash(switch.ip_address, switch.username)
+            return jsonify(
+                {
+                    "ok": True,
+                    "message": (
+                        f"Successfully updated {interface} and saved to startup-config."
+                    ),
+                    "hash": new_hash,
+                }
+            )
+        return jsonify({"ok": False, "error": f"Failed to update {interface}. {err_detail}"})
+
     if success:
-        flash(f"Successfully updated {interface} and saved to startup-config.", "success")
+        flash(
+            f"Successfully updated {interface} and saved to startup-config.", "success"
+        )
     else:
         flash(f"Failed to update {interface}. {err_detail}", "danger")
-        
-    return redirect(url_for('switches.manage_switch', id=switch.id))
+
+    return redirect(url_for("switches.manage_switch", id=switch.id))
 
 
 @switches_bp.route('/manage/<int:id>/interface-admin', methods=['POST'])
 def set_interface_admin(id):
     switch = Switch.query.get_or_404(id)
-    interface = (request.form.get('interface') or '').strip()
-    admin_state = request.form.get('admin_state')
-    if not interface or admin_state not in ('up', 'down'):
+    json_body = _json_switch_update_payload()
+
+    if json_body is not None:
+        interface = (json_body.get("interface") or "").strip()
+        admin_state = json_body.get("admin_state")
+    else:
+        interface = (request.form.get("interface") or "").strip()
+        admin_state = request.form.get("admin_state")
+
+    if not interface or admin_state not in ("up", "down"):
+        if json_body is not None:
+            return jsonify({"ok": False, "error": "Invalid port or admin state."})
         flash("Invalid port or admin state.", "danger")
-        return redirect(url_for('switches.manage_switch', id=switch.id))
-    enabled = admin_state == 'up'
+        return redirect(url_for("switches.manage_switch", id=switch.id))
+
+    enabled = admin_state == "up"
     success, err_detail = push_interface_admin_state(
         switch.ip_address, switch.username, interface, enabled
     )
+
+    if json_body is not None:
+        if success:
+            action = "enabled" if enabled else "disabled"
+            new_hash, _ = get_config_hash(switch.ip_address, switch.username)
+            return jsonify(
+                {
+                    "ok": True,
+                    "message": (
+                        f"Port {interface} was {action} and startup-config was saved."
+                    ),
+                    "admin_up": enabled,
+                    "interface": interface,
+                    "hash": new_hash,
+                }
+            )
+        return jsonify(
+            {
+                "ok": False,
+                "error": f"Failed to change admin state for {interface}. {err_detail}",
+            }
+        )
+
     if success:
         action = "enabled" if enabled else "disabled"
         flash(
@@ -121,7 +196,7 @@ def set_interface_admin(id):
         )
     else:
         flash(f"Failed to change admin state for {interface}. {err_detail}", "danger")
-    return redirect(url_for('switches.manage_switch', id=switch.id))
+    return redirect(url_for("switches.manage_switch", id=switch.id))
 
 
 @switches_bp.route('/api/hash/<int:id>')

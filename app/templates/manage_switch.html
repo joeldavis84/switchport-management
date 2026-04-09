@@ -15,6 +15,11 @@
 
 <hr>
 
+<div id="manageAjaxFeedback" class="alert d-none mb-3 d-flex align-items-start gap-2" role="status" aria-live="polite">
+    <span id="manageAjaxFeedbackText" class="flex-grow-1"></span>
+    <button type="button" class="btn-close flex-shrink-0 mt-1" aria-label="Dismiss" id="manageAjaxFeedbackDismiss"></button>
+</div>
+
 {% if data.hash %}
 <div class="mb-3">
     <label class="form-label" for="sharedInterfaceSelect">Interface</label>
@@ -101,13 +106,11 @@
         <p class="text-muted small">Set the administrative state of the port chosen above (<code>no shutdown</code> / <code>shutdown</code>). Changes are written to startup-config.</p>
         <form method="POST"
               action="{{ url_for('switches.set_interface_admin', id=switch.id) }}"
-              id="controlsAdminForm"
-              onsubmit="return confirmControlsAdminSubmit(event)">
+              id="controlsAdminForm">
             <input type="hidden" name="interface" id="controlsInterfaceHidden" value="">
             <div class="d-flex flex-wrap gap-2">
                 <button type="submit" name="admin_state" value="up" class="btn btn-success">Enable (no shutdown)</button>
-                <button type="submit" name="admin_state" value="down" class="btn btn-danger"
-                        onclick="return confirm('Shut down this interface? Traffic will stop until the port is enabled again.');">Disable (shutdown)</button>
+                <button type="submit" name="admin_state" value="down" class="btn btn-danger">Disable (shutdown)</button>
             </div>
         </form>
         {% endif %}
@@ -141,12 +144,116 @@
     </div>
 </div>
 
+<div class="modal fade" id="manageWorkModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-primary mb-3" role="status" aria-label="Loading">
+                    <span class="visually-hidden">Loading…</span>
+                </div>
+                <p class="mb-0 text-muted" id="manageWorkModalMessage">Working…</p>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
     let currentHash = "{{ data.hash }}";
     const switchId = "{{ switch.id }}";
+    const updateSwitchJsonUrl = {{ url_for('switches.update_switch', id=switch.id)|tojson }};
+    const interfaceAdminJsonUrl = {{ url_for('switches.set_interface_admin', id=switch.id)|tojson }};
+
+    var manageWorkModalInstance = null;
+    function showWorkModal(message) {
+        var el = document.getElementById('manageWorkModal');
+        var msgEl = document.getElementById('manageWorkModalMessage');
+        if (msgEl) {
+            msgEl.textContent = message || 'Working…';
+        }
+        if (el && window.bootstrap && bootstrap.Modal) {
+            manageWorkModalInstance = bootstrap.Modal.getOrCreateInstance(el, {
+                backdrop: 'static',
+                keyboard: false
+            });
+            manageWorkModalInstance.show();
+        }
+    }
+    function hideWorkModal() {
+        if (manageWorkModalInstance) {
+            manageWorkModalInstance.hide();
+        }
+    }
+
+    function showManageFeedback(kind, text) {
+        var box = document.getElementById('manageAjaxFeedback');
+        var span = document.getElementById('manageAjaxFeedbackText');
+        if (!box || !span) {
+            return;
+        }
+        box.classList.remove('d-none', 'alert-success', 'alert-danger', 'alert-warning');
+        box.classList.add(kind === 'success' ? 'alert-success' : 'alert-danger');
+        span.textContent = text;
+    }
+
+    var manageAjaxDismiss = document.getElementById('manageAjaxFeedbackDismiss');
+    if (manageAjaxDismiss) {
+        manageAjaxDismiss.addEventListener('click', function () {
+            var box = document.getElementById('manageAjaxFeedback');
+            if (box) {
+                box.classList.add('d-none');
+            }
+        });
+    }
+
+    function syncSharedOptionAfterConfigSave() {
+        if (!sharedInterfaceSelect || !sharedInterfaceSelect.value || !portDesc || !modeSelect) {
+            return;
+        }
+        var opt = sharedInterfaceSelect.options[sharedInterfaceSelect.selectedIndex];
+        if (!opt) {
+            return;
+        }
+        opt.dataset.desc = portDesc.value;
+        opt.dataset.mode = modeSelect.value;
+        if (modeSelect.value === 'access') {
+            var ar = document.querySelector('#accessUI input[name="access_vlan"]:checked');
+            opt.dataset.access = ar ? ar.value : '';
+            opt.dataset.trunk = '';
+        } else {
+            var ids = Array.from(document.querySelectorAll('#configForm .trunk-checkbox:checked')).map(function (c) {
+                return c.value;
+            });
+            opt.dataset.trunk = ids.join(',');
+        }
+        var up = opt.getAttribute('data-admin-up') === 'true';
+        opt.textContent = sharedInterfaceSelect.value + ' (' + (portDesc.value || '') + ') — ' + (up ? 'enabled' : 'disabled');
+    }
+
+    function updateSharedOptionAdmin(iface, adminUp) {
+        if (!sharedInterfaceSelect || !iface) {
+            return;
+        }
+        var opts = sharedInterfaceSelect.options;
+        for (var i = 0; i < opts.length; i++) {
+            if (opts[i].value === iface) {
+                opts[i].setAttribute('data-admin-up', adminUp ? 'true' : 'false');
+                var desc = opts[i].dataset.desc || '';
+                opts[i].textContent = iface + ' (' + desc + ') — ' + (adminUp ? 'enabled' : 'disabled');
+                break;
+            }
+        }
+    }
+
+    function parseJsonResponse(r) {
+        var ct = (r.headers.get('content-type') || '').toLowerCase();
+        if (!ct.includes('application/json')) {
+            return Promise.reject(new Error('not json'));
+        }
+        return r.json();
+    }
 
     // 10-second polling for config updates
     setInterval(() => {
@@ -277,31 +384,122 @@
         setManagedTabsEnabled(false);
     }
 
-    function confirmSubmit() {
+    function buildConfigUpdatePayload() {
         var form = document.getElementById('configForm');
-        if (!form) {
-            return;
+        if (!form || !modeSelect) {
+            return null;
         }
         var iface = (configInterfaceHidden && configInterfaceHidden.value) ||
             (sharedInterfaceSelect && sharedInterfaceSelect.value) || '';
         if (!iface) {
             alert('Select an interface above first.');
-            return;
+            return null;
         }
-        if (confirm("WARNING: You are about to apply these changes and persistently save the running configuration to the startup configuration. Proceed?")) {
-            form.submit();
+        var payload = {
+            interface: iface,
+            description: portDesc ? portDesc.value : '',
+            mode: modeSelect.value
+        };
+        if (modeSelect.value === 'access') {
+            var av = form.querySelector('#accessUI input[name="access_vlan"]:checked');
+            payload.access_vlan = av ? av.value : null;
+        } else {
+            payload.trunk_vlans = Array.from(form.querySelectorAll('.trunk-checkbox:checked')).map(function (c) {
+                return c.value;
+            });
         }
+        return payload;
     }
 
-    function confirmControlsAdminSubmit(e) {
-        var iface = (controlsInterfaceHidden && controlsInterfaceHidden.value) ||
-            (sharedInterfaceSelect && sharedInterfaceSelect.value) || '';
-        if (!iface) {
-            e.preventDefault();
-            alert('Select an interface above first.');
-            return false;
+    function confirmSubmit() {
+        var form = document.getElementById('configForm');
+        if (!form) {
+            return;
         }
-        return true;
+        if (!confirm("WARNING: You are about to apply these changes and persistently save the running configuration to the startup configuration. Proceed?")) {
+            return;
+        }
+        var payload = buildConfigUpdatePayload();
+        if (!payload) {
+            return;
+        }
+        showWorkModal('Applying configuration to the switch…');
+        fetch(updateSwitchJsonUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json'
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(payload)
+        })
+            .then(parseJsonResponse)
+            .then(function (data) {
+                hideWorkModal();
+                if (data.ok) {
+                    showManageFeedback('success', data.message || 'Saved.');
+                    if (data.hash) {
+                        currentHash = data.hash;
+                    }
+                    syncSharedOptionAfterConfigSave();
+                } else {
+                    showManageFeedback('danger', data.error || 'Update failed.');
+                }
+            })
+            .catch(function () {
+                hideWorkModal();
+                showManageFeedback('danger', 'Could not reach the server or the response was invalid.');
+            });
+    }
+
+    var controlsAdminForm = document.getElementById('controlsAdminForm');
+    if (controlsAdminForm) {
+        controlsAdminForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var iface = (controlsInterfaceHidden && controlsInterfaceHidden.value) ||
+                (sharedInterfaceSelect && sharedInterfaceSelect.value) || '';
+            if (!iface) {
+                alert('Select an interface above first.');
+                return;
+            }
+            var sub = e.submitter;
+            var state = sub && sub.getAttribute('value');
+            if (state !== 'up' && state !== 'down') {
+                return;
+            }
+            if (state === 'down' && !confirm('Shut down this interface? Traffic will stop until the port is enabled again.')) {
+                return;
+            }
+            showWorkModal(state === 'up' ? 'Bringing the port up…' : 'Shutting the port down…');
+            fetch(interfaceAdminJsonUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json'
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ interface: iface, admin_state: state })
+            })
+                .then(parseJsonResponse)
+                .then(function (data) {
+                    hideWorkModal();
+                    if (data.ok) {
+                        showManageFeedback('success', data.message || 'Done.');
+                        if (data.hash) {
+                            currentHash = data.hash;
+                        }
+                        if (data.interface != null && typeof data.admin_up === 'boolean') {
+                            updateSharedOptionAdmin(data.interface, data.admin_up);
+                        }
+                    } else {
+                        showManageFeedback('danger', data.error || 'Request failed.');
+                    }
+                })
+                .catch(function () {
+                    hideWorkModal();
+                    showManageFeedback('danger', 'Could not reach the server or the response was invalid.');
+                });
+        });
     }
 </script>
 {% endblock %}
