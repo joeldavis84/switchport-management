@@ -36,7 +36,7 @@
         </option>
         {% endfor %}
     </select>
-    <p id="sharedInterfaceHint" class="form-text text-muted small mb-0">Select a port to enable the tabs below.</p>
+    <p id="sharedInterfaceHint" class="form-text text-muted small mb-0">Select a port to use <strong>Switch port configuration</strong> and <strong>Controls</strong>.</p>
 </div>
 {% endif %}
 
@@ -48,7 +48,7 @@
         <button class="nav-link{% if data.hash %} disabled{% endif %}" id="manage-controls-tab" data-bs-toggle="tab" data-bs-target="#manageControlsPane" type="button" role="tab" aria-controls="manageControlsPane" aria-selected="false"{% if data.hash %} disabled aria-disabled="true"{% endif %}>Controls</button>
     </li>
     <li class="nav-item" role="presentation">
-        <button class="nav-link{% if data.hash %} disabled{% endif %}" id="manage-notes-tab" data-bs-toggle="tab" data-bs-target="#manageNotesPane" type="button" role="tab" aria-controls="manageNotesPane" aria-selected="false"{% if data.hash %} disabled aria-disabled="true"{% endif %}>Notes</button>
+        <button class="nav-link" id="manage-notes-tab" data-bs-toggle="tab" data-bs-target="#manageNotesPane" type="button" role="tab" aria-controls="manageNotesPane" aria-selected="false">Switch Notes</button>
     </li>
 </ul>
 <div class="tab-content border border-top-0 rounded-bottom p-3 mb-4" id="manageSwitchTabContent">
@@ -168,25 +168,44 @@
     const switchNoteAddUrl = {{ url_for('switches.switch_note_add', id=switch.id)|tojson }};
     const switchNoteDeleteUrlTpl = {{ url_for('switches.switch_note_delete', id=switch.id, note_id=0)|tojson }};
 
-    var manageWorkModalInstance = null;
+    function manageWorkModalEl() {
+        return document.getElementById('manageWorkModal');
+    }
     function showWorkModal(message) {
-        var el = document.getElementById('manageWorkModal');
+        var el = manageWorkModalEl();
         var msgEl = document.getElementById('manageWorkModalMessage');
         if (msgEl) {
             msgEl.textContent = message || 'Working…';
         }
         if (el && window.bootstrap && bootstrap.Modal) {
-            manageWorkModalInstance = bootstrap.Modal.getOrCreateInstance(el, {
+            var inst = bootstrap.Modal.getOrCreateInstance(el, {
                 backdrop: 'static',
                 keyboard: false
             });
-            manageWorkModalInstance.show();
+            inst.show();
         }
     }
     function hideWorkModal() {
-        if (manageWorkModalInstance) {
-            manageWorkModalInstance.hide();
+        var el = manageWorkModalEl();
+        if (!el) {
+            return;
         }
+        if (window.bootstrap && bootstrap.Modal) {
+            var inst = bootstrap.Modal.getInstance(el);
+            if (inst) {
+                inst.hide();
+                return;
+            }
+        }
+        el.classList.remove('show');
+        el.setAttribute('aria-hidden', 'true');
+        el.style.display = 'none';
+        document.querySelectorAll('.modal-backdrop').forEach(function (b) {
+            b.remove();
+        });
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('overflow');
+        document.body.style.removeProperty('padding-right');
     }
 
     function showManageFeedback(kind, text) {
@@ -323,21 +342,20 @@
             })
                 .then(parseJsonResponse)
                 .then(function (data) {
-                    hideWorkModal();
-                    if (data.ok && data.note) {
+                    if (data && data.ok && data.note) {
                         if (ta) {
                             ta.value = '';
                         }
                         appendSwitchNoteListItem(data.note);
                         showManageFeedback('success', data.message || 'Note added.');
                     } else {
-                        showManageFeedback('danger', data.error || 'Could not save note.');
+                        showManageFeedback('danger', (data && data.error) || 'Could not save note.');
                     }
                 })
                 .catch(function () {
-                    hideWorkModal();
                     showManageFeedback('danger', 'Could not reach the server or the response was invalid.');
-                });
+                })
+                .finally(hideWorkModal);
         });
     }
 
@@ -367,7 +385,7 @@
     const trunkUI = document.getElementById('trunkUI');
     const portDesc = document.getElementById('portDesc');
 
-    var manageTabIds = ['manage-config-tab', 'manage-controls-tab', 'manage-notes-tab'];
+    var manageTabIds = ['manage-config-tab', 'manage-controls-tab'];
 
     function setManagedTabsEnabled(on) {
         manageTabIds.forEach(function (id) {
@@ -521,21 +539,20 @@
         })
             .then(parseJsonResponse)
             .then(function (data) {
-                hideWorkModal();
-                if (data.ok) {
+                if (data && data.ok) {
                     showManageFeedback('success', data.message || 'Saved.');
                     if (data.hash) {
                         currentHash = data.hash;
                     }
                     syncSharedOptionAfterConfigSave();
                 } else {
-                    showManageFeedback('danger', data.error || 'Update failed.');
+                    showManageFeedback('danger', (data && data.error) || 'Update failed.');
                 }
             })
             .catch(function () {
-                hideWorkModal();
                 showManageFeedback('danger', 'Could not reach the server or the response was invalid.');
-            });
+            })
+            .finally(hideWorkModal);
     }
 
     var controlsAdminForm = document.getElementById('controlsAdminForm');
@@ -568,8 +585,7 @@
             })
                 .then(parseJsonResponse)
                 .then(function (data) {
-                    hideWorkModal();
-                    if (data.ok) {
+                    if (data && data.ok) {
                         showManageFeedback('success', data.message || 'Done.');
                         if (data.hash) {
                             currentHash = data.hash;
@@ -578,13 +594,13 @@
                             updateSharedOptionAdmin(data.interface, data.admin_up);
                         }
                     } else {
-                        showManageFeedback('danger', data.error || 'Request failed.');
+                        showManageFeedback('danger', (data && data.error) || 'Request failed.');
                     }
                 })
                 .catch(function () {
-                    hideWorkModal();
                     showManageFeedback('danger', 'Could not reach the server or the response was invalid.');
-                });
+                })
+                .finally(hideWorkModal);
         });
     }
 </script>
