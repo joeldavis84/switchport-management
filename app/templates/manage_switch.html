@@ -20,6 +20,9 @@
         <button class="nav-link active" id="manage-config-tab" data-bs-toggle="tab" data-bs-target="#manageConfigPane" type="button" role="tab" aria-controls="manageConfigPane" aria-selected="true">Switch port configuration</button>
     </li>
     <li class="nav-item" role="presentation">
+        <button class="nav-link" id="manage-controls-tab" data-bs-toggle="tab" data-bs-target="#manageControlsPane" type="button" role="tab" aria-controls="manageControlsPane" aria-selected="false">Controls</button>
+    </li>
+    <li class="nav-item" role="presentation">
         <button class="nav-link" id="manage-notes-tab" data-bs-toggle="tab" data-bs-target="#manageNotesPane" type="button" role="tab" aria-controls="manageNotesPane" aria-selected="false">Notes</button>
     </li>
 </ul>
@@ -81,6 +84,41 @@
 
                 <button type="button" class="btn btn-warning" onclick="confirmSubmit()">Apply & Save Configuration</button>
             </div>
+        </form>
+        {% endif %}
+    </div>
+    <div class="tab-pane fade" id="manageControlsPane" role="tabpanel" aria-labelledby="manage-controls-tab" tabindex="0">
+        {% if not data.hash %}
+        <div class="alert alert-danger mb-0">{{ data.error or "Could not load switch data (no error detail was recorded)." }}</div>
+        {% else %}
+        <p class="text-muted small">Set the administrative state of an Ethernet port (<code>no shutdown</code> / <code>shutdown</code>). Changes are written to startup-config.</p>
+        <form method="POST"
+              action="{{ url_for('switches.set_interface_admin', id=switch.id) }}"
+              id="controlsAdminForm"
+              onsubmit="return confirmControlsAdminSubmit(event)">
+            <div class="mb-3">
+                <label class="form-label" for="controlsInterfaceSelect">Interface</label>
+                <select class="form-select" name="interface" id="controlsInterfaceSelect" required>
+                    <option value="">-- Choose an Interface --</option>
+                    {% for intf in data.interfaces %}
+                    <option value="{{ intf.name }}" data-admin-up="{{ 'true' if intf.admin_up else 'false' }}">
+                        {{ intf.name }} — {% if intf.admin_up %}enabled{% else %}disabled{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <fieldset class="mb-3">
+                <legend class="form-label fs-6 mb-2">Admin state</legend>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="admin_state" id="controlsAdminUp" value="up">
+                    <label class="form-check-label" for="controlsAdminUp">Enable (no shutdown)</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="admin_state" id="controlsAdminDown" value="down">
+                    <label class="form-check-label" for="controlsAdminDown">Disable (shutdown)</label>
+                </div>
+            </fieldset>
+            <button type="submit" class="btn btn-primary">Apply admin state</button>
         </form>
         {% endif %}
     </div>
@@ -203,6 +241,45 @@
         if (confirm("WARNING: You are about to apply these changes and persistently save the running configuration to the startup configuration. Proceed?")) {
             form.submit();
         }
+    }
+
+    function confirmControlsAdminSubmit(e) {
+        var form = e.target;
+        var down = form.querySelector('input[name="admin_state"][value="down"]');
+        if (down && down.checked) {
+            if (!confirm("Shut down this interface? Traffic will stop until the port is enabled again.")) {
+                e.preventDefault();
+                return false;
+            }
+        }
+        return true;
+    }
+
+    var controlsIntf = document.getElementById('controlsInterfaceSelect');
+    var controlsAdminUp = document.getElementById('controlsAdminUp');
+    var controlsAdminDown = document.getElementById('controlsAdminDown');
+    function syncControlsAdminRadios() {
+        if (!controlsIntf || !controlsAdminUp || !controlsAdminDown) {
+            return;
+        }
+        var opt = controlsIntf.options[controlsIntf.selectedIndex];
+        if (!opt || !opt.value) {
+            controlsAdminUp.checked = false;
+            controlsAdminDown.checked = false;
+            return;
+        }
+        var up = opt.getAttribute('data-admin-up') === 'true';
+        if (up) {
+            controlsAdminUp.checked = true;
+            controlsAdminDown.checked = false;
+        } else {
+            controlsAdminUp.checked = false;
+            controlsAdminDown.checked = true;
+        }
+    }
+    if (controlsIntf && controlsAdminUp && controlsAdminDown) {
+        controlsIntf.addEventListener('change', syncControlsAdminRadios);
+        syncControlsAdminRadios();
     }
 </script>
 {% endblock %}

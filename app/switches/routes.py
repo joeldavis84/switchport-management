@@ -9,6 +9,7 @@ from .arista_utils import (
     get_switch_logging_last,
     get_vlan_detail,
     get_vlan_table,
+    push_interface_admin_state,
     push_switch_config,
 )
 
@@ -98,6 +99,30 @@ def update_switch(id):
         flash(f"Failed to update {interface}. {err_detail}", "danger")
         
     return redirect(url_for('switches.manage_switch', id=switch.id))
+
+
+@switches_bp.route('/manage/<int:id>/interface-admin', methods=['POST'])
+def set_interface_admin(id):
+    switch = Switch.query.get_or_404(id)
+    interface = (request.form.get('interface') or '').strip()
+    admin_state = request.form.get('admin_state')
+    if not interface or admin_state not in ('up', 'down'):
+        flash("Invalid port or admin state.", "danger")
+        return redirect(url_for('switches.manage_switch', id=switch.id))
+    enabled = admin_state == 'up'
+    success, err_detail = push_interface_admin_state(
+        switch.ip_address, switch.username, interface, enabled
+    )
+    if success:
+        action = "enabled" if enabled else "disabled"
+        flash(
+            f"Port {interface} was {action} and startup-config was saved.",
+            "success",
+        )
+    else:
+        flash(f"Failed to change admin state for {interface}. {err_detail}", "danger")
+    return redirect(url_for('switches.manage_switch', id=switch.id))
+
 
 @switches_bp.route('/api/hash/<int:id>')
 def check_hash(id):

@@ -122,12 +122,17 @@ def get_switch_data(ip, username):
                 access_vlan = str(sp_info.get('switchportInfo', {}).get('accessVlanId', 1))
                 trunk_vlans = sp_info.get('switchportInfo', {}).get('trunkAllowedVlans', '1-4094')
 
+                # EOS: interfaceStatus "disabled" = administratively shutdown
+                status = (intf_info.get('interfaceStatus') or '').lower()
+                admin_up = status != 'disabled'
+
                 data['interfaces'].append({
                     'name': intf_name,
                     'description': normalize_port_description(intf_info.get('description') or ''),
                     'mode': mode,
                     'access_vlan': access_vlan,
-                    'trunk_vlans': trunk_vlans
+                    'trunk_vlans': trunk_vlans,
+                    'admin_up': admin_up,
                 })
     except json.JSONDecodeError as e:
         data['error'] = (
@@ -175,6 +180,25 @@ def push_switch_config(ip, username, interface, description, mode, selected_vlan
     except Exception as e:
         msg = format_connection_error(ip, username, e)
         logger.warning("push_switch_config failed for %s: %s", ip, msg)
+        return False, msg
+
+
+def push_interface_admin_state(ip: str, username: str, interface: str, enabled: bool):
+    """Apply `shutdown` or `no shutdown` on an interface and save to startup-config."""
+    try:
+        with get_connection(ip, username) as net_connect:
+            net_connect.enable()
+            commands = [f"interface {interface}"]
+            if enabled:
+                commands.append("no shutdown")
+            else:
+                commands.append("shutdown")
+            net_connect.send_config_set(commands, bypass_commands=_CONFIG_SET_BYPASS)
+            net_connect.send_command("write memory")
+            return True, None
+    except Exception as e:
+        msg = format_connection_error(ip, username, e)
+        logger.warning("push_interface_admin_state failed for %s %s: %s", ip, interface, msg)
         return False, msg
 
 
