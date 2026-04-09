@@ -48,6 +48,14 @@ def _json_switch_update_payload():
     return body if isinstance(body, dict) else None
 
 
+def _wants_manage_json_response():
+    """True when the client expects JSON (Accept or JSON request body)."""
+    accept = (request.headers.get("Accept") or "").lower()
+    if "application/json" in accept:
+        return True
+    return bool(request.is_json)
+
+
 @switches_bp.route('/manage/<int:id>', methods=['GET'])
 def manage_switch(id):
     switch = Switch.query.get_or_404(id)
@@ -101,11 +109,17 @@ def switch_note_delete(id, note_id):
     switch = Switch.query.get_or_404(id)
     note = SwitchNote.query.get_or_404(note_id)
     if note.switch_id != switch.id:
+        if _wants_manage_json_response():
+            return jsonify({"ok": False, "error": "Not found."}), 404
         abort(404)
     db.session.delete(note)
     db.session.commit()
+    if _wants_manage_json_response():
+        return jsonify(
+            {"ok": True, "message": "Note removed.", "note_id": note_id}
+        )
     flash("Note removed.", "success")
-    return redirect(url_for('switches.manage_switch', id=switch.id))
+    return redirect(url_for("switches.manage_switch", id=switch.id))
 
 
 @switches_bp.route('/manage/<int:id>/update', methods=['POST'])

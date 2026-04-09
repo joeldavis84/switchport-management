@@ -1,5 +1,30 @@
 {% extends 'base.html' %}
 {% block content %}
+<style>
+/* Full-screen busy overlay (avoids Bootstrap modal quirks with tabs/async). */
+#manageWorkOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(33, 37, 41, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+#manageWorkOverlay.d-none {
+    display: none !important;
+}
+#manageWorkOverlay .manage-work-card {
+    background: var(--bs-body-bg, #fff);
+    border-radius: 0.5rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    padding: 2rem;
+    text-align: center;
+    min-width: 280px;
+    max-width: 100%;
+}
+</style>
 
 <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-3">
     <h2 class="mb-0">Manage: {{ switch.description }} ({{ switch.ip_address }})</h2>
@@ -126,9 +151,9 @@
                         <div class="text-muted small mb-1">{{ note.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</div>
                         <div class="text-break" style="white-space: pre-wrap;">{{ note.body }}</div>
                     </div>
-                    <form method="post" action="{{ url_for('switches.switch_note_delete', id=switch.id, note_id=note.id) }}" class="flex-shrink-0">
-                        <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
-                    </form>
+                    <div class="flex-shrink-0">
+                        <button type="button" class="btn btn-sm btn-outline-danger js-switch-note-remove" data-note-id="{{ note.id }}">Remove</button>
+                    </div>
                 </div>
             </li>
             {% else %}
@@ -144,16 +169,10 @@
     </div>
 </div>
 
-<div class="modal fade" id="manageWorkModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-body text-center py-4">
-                <div class="spinner-border text-primary mb-3" role="status" aria-label="Loading">
-                    <span class="visually-hidden">Loading…</span>
-                </div>
-                <p class="mb-0 text-muted" id="manageWorkModalMessage">Working…</p>
-            </div>
-        </div>
+<div id="manageWorkOverlay" class="d-none" aria-hidden="true" role="status" aria-live="polite">
+    <div class="manage-work-card">
+        <div class="spinner-border text-primary mb-3" role="presentation" aria-hidden="true"></div>
+        <p class="mb-0 text-muted" id="manageWorkOverlayMessage">Working…</p>
     </div>
 </div>
 
@@ -168,44 +187,26 @@
     const switchNoteAddUrl = {{ url_for('switches.switch_note_add', id=switch.id)|tojson }};
     const switchNoteDeleteUrlTpl = {{ url_for('switches.switch_note_delete', id=switch.id, note_id=0)|tojson }};
 
-    function manageWorkModalEl() {
-        return document.getElementById('manageWorkModal');
+    function manageWorkOverlayEl() {
+        return document.getElementById('manageWorkOverlay');
     }
     function showWorkModal(message) {
-        var el = manageWorkModalEl();
-        var msgEl = document.getElementById('manageWorkModalMessage');
+        var el = manageWorkOverlayEl();
+        var msgEl = document.getElementById('manageWorkOverlayMessage');
         if (msgEl) {
             msgEl.textContent = message || 'Working…';
         }
-        if (el && window.bootstrap && bootstrap.Modal) {
-            var inst = bootstrap.Modal.getOrCreateInstance(el, {
-                backdrop: 'static',
-                keyboard: false
-            });
-            inst.show();
+        if (el) {
+            el.classList.remove('d-none');
+            el.setAttribute('aria-hidden', 'false');
         }
     }
     function hideWorkModal() {
-        var el = manageWorkModalEl();
-        if (!el) {
-            return;
+        var el = manageWorkOverlayEl();
+        if (el) {
+            el.classList.add('d-none');
+            el.setAttribute('aria-hidden', 'true');
         }
-        if (window.bootstrap && bootstrap.Modal) {
-            var inst = bootstrap.Modal.getInstance(el);
-            if (inst) {
-                inst.hide();
-                return;
-            }
-        }
-        el.classList.remove('show');
-        el.setAttribute('aria-hidden', 'true');
-        el.style.display = 'none';
-        document.querySelectorAll('.modal-backdrop').forEach(function (b) {
-            b.remove();
-        });
-        document.body.classList.remove('modal-open');
-        document.body.style.removeProperty('overflow');
-        document.body.style.removeProperty('padding-right');
     }
 
     function showManageFeedback(kind, text) {
@@ -305,17 +306,16 @@
         bodyEl.textContent = note.body || '';
         inner.appendChild(meta);
         inner.appendChild(bodyEl);
-        var form = document.createElement('form');
-        form.method = 'post';
-        form.action = switchNoteDeleteUrl(note.id);
-        form.className = 'flex-shrink-0';
+        var wrap = document.createElement('div');
+        wrap.className = 'flex-shrink-0';
         var btn = document.createElement('button');
-        btn.type = 'submit';
-        btn.className = 'btn btn-sm btn-outline-danger';
+        btn.type = 'button';
+        btn.className = 'btn btn-sm btn-outline-danger js-switch-note-remove';
+        btn.setAttribute('data-note-id', String(note.id));
         btn.textContent = 'Remove';
-        form.appendChild(btn);
+        wrap.appendChild(btn);
         outer.appendChild(inner);
-        outer.appendChild(form);
+        outer.appendChild(wrap);
         li.appendChild(outer);
         ul.appendChild(li);
     }
@@ -350,6 +350,66 @@
                         showManageFeedback('success', data.message || 'Note added.');
                     } else {
                         showManageFeedback('danger', (data && data.error) || 'Could not save note.');
+                    }
+                })
+                .catch(function () {
+                    showManageFeedback('danger', 'Could not reach the server or the response was invalid.');
+                })
+                .finally(hideWorkModal);
+        });
+    }
+
+    function refreshSwitchNotesEmptyState() {
+        var ul = document.getElementById('switchNotesList');
+        if (!ul) {
+            return;
+        }
+        var hasNote = ul.querySelector('li.list-group-item[data-note-id]');
+        var empty = document.getElementById('switchNotesEmpty');
+        if (!hasNote) {
+            if (!empty) {
+                var li = document.createElement('li');
+                li.className = 'list-group-item text-muted';
+                li.id = 'switchNotesEmpty';
+                li.textContent = 'No notes yet.';
+                ul.appendChild(li);
+            }
+        } else if (empty) {
+            empty.remove();
+        }
+    }
+
+    var switchNotesListEl = document.getElementById('switchNotesList');
+    if (switchNotesListEl) {
+        switchNotesListEl.addEventListener('click', function (e) {
+            var btn = e.target.closest('.js-switch-note-remove');
+            if (!btn) {
+                return;
+            }
+            var noteId = btn.getAttribute('data-note-id');
+            if (!noteId) {
+                return;
+            }
+            if (!confirm('Remove this note?')) {
+                return;
+            }
+            showWorkModal('Removing note…');
+            fetch(switchNoteDeleteUrl(noteId), {
+                method: 'POST',
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin'
+            })
+                .then(parseJsonResponse)
+                .then(function (data) {
+                    if (data && data.ok) {
+                        var li = btn.closest('li[data-note-id]');
+                        if (li) {
+                            li.remove();
+                        }
+                        refreshSwitchNotesEmptyState();
+                        showManageFeedback('success', data.message || 'Note removed.');
+                    } else {
+                        showManageFeedback('danger', (data && data.error) || 'Could not remove note.');
                     }
                 })
                 .catch(function () {
