@@ -209,20 +209,40 @@
         }
     }
 
+    var manageAjaxFeedbackAutoHideTimer = null;
+    function clearManageFeedbackAutoHide() {
+        if (manageAjaxFeedbackAutoHideTimer !== null) {
+            clearTimeout(manageAjaxFeedbackAutoHideTimer);
+            manageAjaxFeedbackAutoHideTimer = null;
+        }
+    }
+
     function showManageFeedback(kind, text) {
         var box = document.getElementById('manageAjaxFeedback');
         var span = document.getElementById('manageAjaxFeedbackText');
         if (!box || !span) {
             return;
         }
+        clearManageFeedbackAutoHide();
         box.classList.remove('d-none', 'alert-success', 'alert-danger', 'alert-warning');
-        box.classList.add(kind === 'success' ? 'alert-success' : 'alert-danger');
+        var isSuccess = kind === 'success';
+        box.classList.add(isSuccess ? 'alert-success' : 'alert-danger');
         span.textContent = text;
+        if (isSuccess) {
+            manageAjaxFeedbackAutoHideTimer = setTimeout(function () {
+                manageAjaxFeedbackAutoHideTimer = null;
+                var b = document.getElementById('manageAjaxFeedback');
+                if (b && b.classList.contains('alert-success') && !b.classList.contains('d-none')) {
+                    b.classList.add('d-none');
+                }
+            }, 2000);
+        }
     }
 
     var manageAjaxDismiss = document.getElementById('manageAjaxFeedbackDismiss');
     if (manageAjaxDismiss) {
         manageAjaxDismiss.addEventListener('click', function () {
+            clearManageFeedbackAutoHide();
             var box = document.getElementById('manageAjaxFeedback');
             if (box) {
                 box.classList.add('d-none');
