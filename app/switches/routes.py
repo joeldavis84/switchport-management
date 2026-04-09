@@ -145,8 +145,12 @@ def switch_logs_poll(id):
         switch.ip_address, switch.username, LOG_TAIL_LINES
     )
     if log_err:
-        return jsonify({"log": "", "error": log_err})
-    return jsonify({"log": log_text or "", "error": None})
+        resp = jsonify({"log": "", "error": log_err})
+    else:
+        resp = jsonify({"log": log_text if log_text is not None else "", "error": None})
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 @switches_bp.route('/manage/<int:id>/vlans', methods=['GET'])

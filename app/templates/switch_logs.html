@@ -10,10 +10,12 @@
 </div>
 
 <p class="text-muted small mb-2">
-    Output from <code>show logging last {{ log_tail_lines }}</code>. This view refreshes every <strong>5 seconds</strong>; each refresh runs a new command on the switch and <strong>replaces</strong> the text below entirely.
+    Output from <code>show logging last {{ log_tail_lines }}</code>. While running, this view fetches new output every <strong>5 seconds</strong> and <strong>replaces</strong> the log below. Use <strong>Pause refresh</strong> to stop.
+    <span id="refreshStatusLine" class="d-none"></span>
 </p>
 
 <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <button type="button" class="btn btn-outline-secondary" id="pauseRefreshBtn" aria-pressed="false">Pause refresh</button>
     <button type="button" class="btn btn-primary" id="copyLogBtn">Copy entire log to clipboard</button>
     <span class="text-muted small" id="copyLogFeedback" aria-live="polite"></span>
 </div>
@@ -28,11 +30,21 @@
 {% block scripts %}
 <script>
 (function () {
-    var pollUrl = {{ url_for('switches.switch_logs_poll', id=switch.id) | tojson }};
+    var path = window.location.pathname;
+    var pollUrl = path.endsWith('/') ? path + 'poll' : path + '/poll';
     var pre = document.getElementById('switchLogPre');
     var errEl = document.getElementById('logPollError');
     var copyBtn = document.getElementById('copyLogBtn');
     var copyFb = document.getElementById('copyLogFeedback');
+    var pauseBtn = document.getElementById('pauseRefreshBtn');
+    var statusLine = document.getElementById('refreshStatusLine');
+
+    if (!pre || !pauseBtn) {
+        return;
+    }
+
+    var pollTimer = null;
+    var paused = false;
 
     function setError(msg) {
         if (!msg) {
@@ -44,29 +56,96 @@
         errEl.classList.remove('d-none');
     }
 
+    function scrollLogToBottom() {
+        requestAnimationFrame(function () {
+            pre.scrollTop = pre.scrollHeight;
+        });
+    }
+
     function replaceLog(text) {
-        pre.textContent = text != null ? text : '';
+        pre.textContent = text != null ? String(text) : '';
+        scrollLogToBottom();
     }
 
     function poll() {
-        fetch(pollUrl, { cache: 'no-store' })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (data.error) {
-                    replaceLog('');
-                    setError(data.error);
-                } else {
-                    setError('');
-                    replaceLog(data.log);
+        if (paused) {
+            return;
+        }
+        fetch(pollUrl, {
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json' }
+        })
+            .then(function (r) {
+                if (!r.ok) {
+                    throw new Error('HTTP ' + r.status);
                 }
+                var ct = (r.headers.get('content-type') || '').toLowerCase();
+                if (ct.indexOf('application/json') === -1) {
+                    throw new Error('Expected JSON from poll endpoint');
+                }
+                return r.json();
+            })
+            .then(function (data) {
+                if (!data || typeof data !== 'object') {
+                    throw new Error('Invalid poll response');
+                }
+                var err = data.error;
+                if (err != null && err !== '') {
+                    replaceLog('');
+                    setError(String(err));
+                    return;
+                }
+                setError('');
+                var logText = data.log;
+                if (logText === undefined || logText === null) {
+                    logText = '';
+                }
+                replaceLog(logText);
             })
             .catch(function () {
                 replaceLog('');
-                setError('Failed to refresh logs (network error).');
+                setError('Failed to refresh logs (network or server error).');
             });
     }
 
-    setInterval(poll, 5000);
+    function startRefresh() {
+        if (pollTimer !== null) {
+            return;
+        }
+        paused = false;
+        pollTimer = window.setInterval(poll, 5000);
+        pauseBtn.textContent = 'Pause refresh';
+        pauseBtn.classList.remove('active');
+        pauseBtn.setAttribute('aria-pressed', 'false');
+        statusLine.classList.add('d-none');
+        statusLine.textContent = '';
+    }
+
+    function stopRefresh() {
+        if (pollTimer !== null) {
+            window.clearInterval(pollTimer);
+            pollTimer = null;
+        }
+        paused = true;
+        pauseBtn.textContent = 'Resume refresh';
+        pauseBtn.classList.add('active');
+        pauseBtn.setAttribute('aria-pressed', 'true');
+        statusLine.textContent = ' Refresh is paused.';
+        statusLine.classList.remove('d-none');
+    }
+
+    pauseBtn.addEventListener('click', function () {
+        if (pollTimer !== null) {
+            stopRefresh();
+        } else {
+            startRefresh();
+            poll();
+        }
+    });
+
+    startRefresh();
+    scrollLogToBottom();
 
     function copyViaExecCommand(text) {
         var ta = document.createElement('textarea');
