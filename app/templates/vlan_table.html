@@ -5,7 +5,8 @@
     <div class="d-flex flex-column align-items-end gap-2">
         <a href="{{ url_for('switches.manage_switch', id=switch.id) }}" class="btn btn-secondary">Back to Manage Switch</a>
         <div class="btn-group" role="group" aria-label="Navigation">
-            <a href="{{ url_for('switches.arp_table', id=switch.id) }}" class="btn btn-outline-info">View ARP table</a>
+            <a href="#" class="btn btn-primary" aria-current="page">View VLANs</a>
+            <a href="{{ url_for('switches.arp_table', id=switch.id) }}" class="btn btn-outline-secondary">View ARP table</a>
             <a href="{{ url_for('switches.switch_logs', id=switch.id) }}" class="btn btn-outline-dark">View logs</a>
         </div>
     </div>
