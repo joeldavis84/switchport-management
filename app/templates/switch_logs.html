@@ -1,16 +1,12 @@
 {% extends 'base.html' %}
 {% block content %}
 <style>
-/* Log syntax highlighting (dark panel, GitHub-dark–style accents) */
+/* Log syntax highlighting (dark panel) */
 #switchLogPre .log-time { color: #79c0ff; }
+#switchLogPre .log-host { color: #fa8072; }
+#switchLogPre .log-fac-head { color: #c678ff; font-weight: 700; }
 #switchLogPre .log-ip { color: #7ee787; }
 #switchLogPre .log-intf { color: #ffa657; font-weight: 500; }
-#switchLogPre .log-sev { font-weight: 600; }
-#switchLogPre .log-sev-0, #switchLogPre .log-sev-1 { color: #ff7b72; }
-#switchLogPre .log-sev-2, #switchLogPre .log-sev-3 { color: #ffa657; }
-#switchLogPre .log-sev-4 { color: #e3b341; }
-#switchLogPre .log-sev-5 { color: #a5d6ff; }
-#switchLogPre .log-sev-6, #switchLogPre .log-sev-7 { color: #8b949e; font-weight: 500; }
 </style>
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h2 class="mb-0">Logs: {{ switch.description }} ({{ switch.ip_address }})</h2>
@@ -22,7 +18,7 @@
 </div>
 
 <p class="text-muted small mb-2">
-    Output from <code>show logging last {{ log_tail_lines }}</code>. While running, this view fetches new output every <strong>5 seconds</strong> and <strong>replaces</strong> the log below. Use <strong>Pause refresh</strong> to stop. Timestamps, syslog-style <code>%FACILITY-severity-…</code> tokens, IPv4 addresses, and common interface names are highlighted in the browser.
+    Output from <code>show logging last {{ log_tail_lines }}</code>. While running, this view fetches new output every <strong>5 seconds</strong> and <strong>replaces</strong> the log below. Use <strong>Pause refresh</strong> to stop. Timestamps, switch hostname (salmon), the <code>%FACILITY-severity-MNEMONIC</code> token before the message colon (bold purple), IPv4 addresses, and common interface names are highlighted in the browser.
     <span id="refreshStatusLine" class="d-none"></span>
 </p>
 
@@ -84,13 +80,18 @@
 
     function highlightLogLine(line) {
         var s = escapeHtml(line);
-        s = s.replace(/(%[A-Z0-9_]+-([0-7])-[A-Z0-9_-]+)/g, function (_, token, sev) {
-            return '<span class="log-sev log-sev-' + sev + '">' + token + '</span>';
-        });
         s = s.replace(/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[\+\-]\d{2}:?\d{2})?\s*)/, '<span class="log-time">$1</span>');
         s = s.replace(
             /^(((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s*)/i,
             '<span class="log-time">$1</span>'
+        );
+        s = s.replace(
+            /^(<span class="log-time">[^<]*<\/span>)\s+([A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?)(?=\s+%)/,
+            '$1 <span class="log-host">$2</span>'
+        );
+        s = s.replace(
+            /(%[A-Z0-9_]+-[0-7]-[A-Z0-9_-]+)(:?)/g,
+            '<span class="log-fac-head">$1</span>$2'
         );
         s = s.replace(/\b((?:\d{1,3}\.){3}\d{1,3})\b/g, '<span class="log-ip">$1</span>');
         s = s.replace(
