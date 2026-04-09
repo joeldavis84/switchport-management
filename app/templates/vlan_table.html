@@ -3,9 +3,9 @@
 <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-3">
     <h2 class="mb-0">VLANs: {{ switch.description }} ({{ switch.ip_address }})</h2>
     <div class="d-flex flex-column align-items-end gap-2">
-        <div class="btn-group" role="group" aria-label="Back navigation">
-            <a href="{{ url_for('switches.index') }}" class="btn btn-outline-secondary">Back to Switches</a>
-            <a href="{{ url_for('switches.manage_switch', id=switch.id) }}" class="btn btn-secondary">Back to Manage Switch</a>
+        <div class="d-inline-flex flex-wrap gap-2 justify-content-end" role="group" aria-label="Back navigation">
+            <a href="{{ url_for('switches.index') }}" class="btn btn-secondary rounded-pill">Back to Switches</a>
+            <a href="{{ url_for('switches.manage_switch', id=switch.id) }}" class="btn btn-outline-secondary rounded-pill">Back to Manage Switch</a>
         </div>
         <div class="btn-group" role="group" aria-label="Navigation">
             <a href="#" class="btn btn-primary" aria-current="page">View VLANs</a>
