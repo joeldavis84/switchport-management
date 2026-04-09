@@ -10,7 +10,7 @@
 </div>
 
 <p class="text-muted small mb-2">
-    Output from <code>show logging {{ log_tail_lines }}</code>. This view refreshes every <strong>5 seconds</strong>; each refresh runs a new command on the switch and <strong>replaces</strong> the text below entirely.
+    Output from <code>show logging last {{ log_tail_lines }}</code>. This view refreshes every <strong>5 seconds</strong>; each refresh runs a new command on the switch and <strong>replaces</strong> the text below entirely.
 </p>
 
 <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
@@ -68,6 +68,45 @@
 
     setInterval(poll, 5000);
 
+    function copyViaExecCommand(text) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        ta.style.top = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, text.length);
+        var ok = false;
+        try {
+            ok = document.execCommand('copy');
+        } catch (e) {
+            ok = false;
+        }
+        document.body.removeChild(ta);
+        return ok;
+    }
+
+    function copyToClipboard(text, onSuccess, onFail) {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            navigator.clipboard.writeText(text).then(onSuccess).catch(function () {
+                if (copyViaExecCommand(text)) {
+                    onSuccess();
+                } else {
+                    onFail();
+                }
+            });
+            return;
+        }
+        if (copyViaExecCommand(text)) {
+            onSuccess();
+        } else {
+            onFail();
+        }
+    }
+
     copyBtn.addEventListener('click', function () {
         var text = pre.textContent;
         if (!text) {
@@ -75,13 +114,17 @@
             setTimeout(function () { copyFb.textContent = ''; }, 2500);
             return;
         }
-        navigator.clipboard.writeText(text).then(function () {
-            copyFb.textContent = 'Copied.';
-            setTimeout(function () { copyFb.textContent = ''; }, 2500);
-        }).catch(function () {
-            copyFb.textContent = 'Copy failed (clipboard permission?).';
-            setTimeout(function () { copyFb.textContent = ''; }, 4000);
-        });
+        copyToClipboard(
+            text,
+            function () {
+                copyFb.textContent = 'Copied.';
+                setTimeout(function () { copyFb.textContent = ''; }, 2500);
+            },
+            function () {
+                copyFb.textContent = 'Copy failed. Try selecting the log and pressing Ctrl+C.';
+                setTimeout(function () { copyFb.textContent = ''; }, 5000);
+            }
+        );
     });
 })();
 </script>
