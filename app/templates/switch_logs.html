@@ -18,7 +18,7 @@
 </div>
 
 <p class="text-muted small mb-2">
-    Output from <code>show logging last {{ log_tail_lines }}</code>. While running, this view fetches new output every <strong>5 seconds</strong> and <strong>replaces</strong> the log below. Use <strong>Pause refresh</strong> to stop. Timestamps, switch hostname (salmon), the <code>%FACILITY-severity-MNEMONIC</code> token before the message colon (bold purple), IPv4 addresses, and common interface names are highlighted in the browser.
+    Output from <code>show logging last {{ log_tail_lines }}</code>. While running, this view fetches new output every <strong>5 seconds</strong> and <strong>replaces</strong> the log below. Use <strong>Pause refresh</strong> to stop. Timestamps, switch hostname (salmon), syslog process tag before the colon when followed by a <code>%…</code> message (e.g. <code>ConfigAgent:</code>, bold purple), <code>%FACILITY-severity-…</code> tokens (bold purple), IPv4 addresses, and common interface names are highlighted in the browser.
     <span id="refreshStatusLine" class="d-none"></span>
 </p>
 
@@ -80,13 +80,22 @@
 
     function highlightLogLine(line) {
         var s = escapeHtml(line);
-        s = s.replace(/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[\+\-]\d{2}:?\d{2})?\s*)/, '<span class="log-time">$1</span>');
         s = s.replace(
-            /^(((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s*)/i,
+            /^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[\+\-]\d{2}:?\d{2})?)(?=\s|$)/,
             '<span class="log-time">$1</span>'
         );
         s = s.replace(
-            /^(<span class="log-time">[^<]*<\/span>)\s+([A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9])?)(?=\s+%)/,
+            /^((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})(?=\s)/i,
+            '<span class="log-time">$1</span>'
+        );
+        /* Apr  9 13:40:28 tor-sw-210 ConfigAgent: %SYS-4-... (\s* after </span> in case timestamp ate the space) */
+        s = s.replace(
+            /^(<span class="log-time">[^<]*<\/span>)\s*(\S+)\s+([A-Za-z0-9][A-Za-z0-9_.-]*):\s*(?=%)/,
+            '$1 <span class="log-host">$2</span> <span class="log-fac-head">$3</span>: '
+        );
+        /* Timestamp hostname %ETH-5-... (no process tag) */
+        s = s.replace(
+            /^(<span class="log-time">[^<]*<\/span>)\s*(\S+)(?=\s+%)/,
             '$1 <span class="log-host">$2</span>'
         );
         s = s.replace(
