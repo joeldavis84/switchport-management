@@ -15,15 +15,35 @@
 
 <hr>
 
+{% if data.hash %}
+<div class="mb-3">
+    <label class="form-label" for="sharedInterfaceSelect">Interface</label>
+    <select class="form-select" id="sharedInterfaceSelect" aria-describedby="sharedInterfaceHint">
+        <option value="">-- Choose an Interface --</option>
+        {% for intf in data.interfaces %}
+        <option value="{{ intf.name }}"
+                data-desc="{{ intf.description }}"
+                data-mode="{{ intf.mode }}"
+                data-access="{{ intf.access_vlan }}"
+                data-trunk="{{ intf.trunk_vlans }}"
+                data-admin-up="{{ 'true' if intf.admin_up else 'false' }}">
+            {{ intf.name }} ({{ intf.description }}) — {% if intf.admin_up %}enabled{% else %}disabled{% endif %}
+        </option>
+        {% endfor %}
+    </select>
+    <p id="sharedInterfaceHint" class="form-text text-muted small mb-0">Select a port to enable the tabs below.</p>
+</div>
+{% endif %}
+
 <ul class="nav nav-tabs" id="manageSwitchTabs" role="tablist">
     <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="manage-config-tab" data-bs-toggle="tab" data-bs-target="#manageConfigPane" type="button" role="tab" aria-controls="manageConfigPane" aria-selected="true">Switch port configuration</button>
+        <button class="nav-link active{% if data.hash %} disabled{% endif %}" id="manage-config-tab" data-bs-toggle="tab" data-bs-target="#manageConfigPane" type="button" role="tab" aria-controls="manageConfigPane" aria-selected="true"{% if data.hash %} disabled aria-disabled="true"{% endif %}>Switch port configuration</button>
     </li>
     <li class="nav-item" role="presentation">
-        <button class="nav-link" id="manage-controls-tab" data-bs-toggle="tab" data-bs-target="#manageControlsPane" type="button" role="tab" aria-controls="manageControlsPane" aria-selected="false">Controls</button>
+        <button class="nav-link{% if data.hash %} disabled{% endif %}" id="manage-controls-tab" data-bs-toggle="tab" data-bs-target="#manageControlsPane" type="button" role="tab" aria-controls="manageControlsPane" aria-selected="false"{% if data.hash %} disabled aria-disabled="true"{% endif %}>Controls</button>
     </li>
     <li class="nav-item" role="presentation">
-        <button class="nav-link" id="manage-notes-tab" data-bs-toggle="tab" data-bs-target="#manageNotesPane" type="button" role="tab" aria-controls="manageNotesPane" aria-selected="false">Notes</button>
+        <button class="nav-link{% if data.hash %} disabled{% endif %}" id="manage-notes-tab" data-bs-toggle="tab" data-bs-target="#manageNotesPane" type="button" role="tab" aria-controls="manageNotesPane" aria-selected="false"{% if data.hash %} disabled aria-disabled="true"{% endif %}>Notes</button>
     </li>
 </ul>
 <div class="tab-content border border-top-0 rounded-bottom p-3 mb-4" id="manageSwitchTabContent">
@@ -32,21 +52,8 @@
         <div class="alert alert-danger mb-0">{{ data.error or "Could not load switch data (no error detail was recorded)." }}</div>
         {% else %}
         <form method="POST" action="{{ url_for('switches.update_switch', id=switch.id) }}" id="configForm">
-            <div class="mb-3">
-                <label class="form-label">Select Interface</label>
-                <select class="form-select" name="interface" id="interfaceSelect" required>
-                    <option value="">-- Choose an Interface --</option>
-                    {% for intf in data.interfaces %}
-                    <option value="{{ intf.name }}"
-                            data-desc="{{ intf.description }}"
-                            data-mode="{{ intf.mode }}"
-                            data-access="{{ intf.access_vlan }}"
-                            data-trunk="{{ intf.trunk_vlans }}">
-                        {{ intf.name }} ({{ intf.description }})
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
+            <input type="hidden" name="interface" id="configInterfaceHidden" value="">
+            <p class="text-muted small">Port settings use the interface selected above.</p>
 
             <div id="interfaceDetails" style="display:none;">
                 <div class="mb-3">
@@ -91,22 +98,12 @@
         {% if not data.hash %}
         <div class="alert alert-danger mb-0">{{ data.error or "Could not load switch data (no error detail was recorded)." }}</div>
         {% else %}
-        <p class="text-muted small">Set the administrative state of an Ethernet port (<code>no shutdown</code> / <code>shutdown</code>). Changes are written to startup-config.</p>
+        <p class="text-muted small">Set the administrative state of the port chosen above (<code>no shutdown</code> / <code>shutdown</code>). Changes are written to startup-config.</p>
         <form method="POST"
               action="{{ url_for('switches.set_interface_admin', id=switch.id) }}"
               id="controlsAdminForm"
               onsubmit="return confirmControlsAdminSubmit(event)">
-            <div class="mb-3">
-                <label class="form-label" for="controlsInterfaceSelect">Interface</label>
-                <select class="form-select" name="interface" id="controlsInterfaceSelect" required>
-                    <option value="">-- Choose an Interface --</option>
-                    {% for intf in data.interfaces %}
-                    <option value="{{ intf.name }}" data-admin-up="{{ 'true' if intf.admin_up else 'false' }}">
-                        {{ intf.name }} — {% if intf.admin_up %}enabled{% else %}disabled{% endif %}
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
+            <input type="hidden" name="interface" id="controlsInterfaceHidden" value="">
             <fieldset class="mb-3">
                 <legend class="form-label fs-6 mb-2">Admin state</legend>
                 <div class="form-check">
@@ -175,94 +172,46 @@
             .catch(err => console.error("Polling error:", err));
     }, 10000);
 
-    const intfSelect = document.getElementById('interfaceSelect');
+    const sharedInterfaceSelect = document.getElementById('sharedInterfaceSelect');
+    const configInterfaceHidden = document.getElementById('configInterfaceHidden');
+    const controlsInterfaceHidden = document.getElementById('controlsInterfaceHidden');
     const modeSelect = document.getElementById('modeSelect');
     const detailsDiv = document.getElementById('interfaceDetails');
     const accessUI = document.getElementById('accessUI');
     const trunkUI = document.getElementById('trunkUI');
     const portDesc = document.getElementById('portDesc');
+    const controlsAdminUp = document.getElementById('controlsAdminUp');
+    const controlsAdminDown = document.getElementById('controlsAdminDown');
 
-    function updateUI() {
-        if (!modeSelect || !accessUI || !trunkUI) {
-            return;
-        }
-        const mode = modeSelect.value;
-        if (mode === 'access') {
-            accessUI.style.display = 'block';
-            trunkUI.style.display = 'none';
-        } else {
-            accessUI.style.display = 'none';
-            trunkUI.style.display = 'block';
-        }
-    }
+    var manageTabIds = ['manage-config-tab', 'manage-controls-tab', 'manage-notes-tab'];
 
-    if (intfSelect && modeSelect && detailsDiv && accessUI && trunkUI && portDesc) {
-    modeSelect.addEventListener('change', updateUI);
-
-    intfSelect.addEventListener('change', function() {
-        if (!this.value) {
-            detailsDiv.style.display = 'none';
-            return;
-        }
-        
-        detailsDiv.style.display = 'block';
-        const selected = this.options[this.selectedIndex];
-        
-        portDesc.value = selected.dataset.desc;
-        modeSelect.value = selected.dataset.mode === 'trunk' ? 'trunk' : 'access';
-        updateUI();
-
-        // Reset inputs
-        document.querySelectorAll('input[type="radio"]').forEach(el => el.checked = false);
-        document.querySelectorAll('.trunk-checkbox').forEach(el => el.checked = false);
-
-        // Populate existing configuration
-        if (modeSelect.value === 'access') {
-            const accVlan = selected.dataset.access;
-            const radio = document.getElementById('radio_' + accVlan);
-            if(radio) radio.checked = true;
-        } else {
-            const trkVlans = selected.dataset.trunk.split(',');
-            // Note: complex ranges like '1-10,20' require more robust JS parsing in production, 
-            // basic array matching shown here for explicit enumerations.
-            trkVlans.forEach(v => {
-                const check = document.getElementById('check_' + v.trim());
-                if(check) check.checked = true;
-            });
-        }
-    });
-    }
-
-    function confirmSubmit() {
-        var form = document.getElementById('configForm');
-        if (!form) {
-            return;
-        }
-        if (confirm("WARNING: You are about to apply these changes and persistently save the running configuration to the startup configuration. Proceed?")) {
-            form.submit();
-        }
-    }
-
-    function confirmControlsAdminSubmit(e) {
-        var form = e.target;
-        var down = form.querySelector('input[name="admin_state"][value="down"]');
-        if (down && down.checked) {
-            if (!confirm("Shut down this interface? Traffic will stop until the port is enabled again.")) {
-                e.preventDefault();
-                return false;
+    function setManagedTabsEnabled(on) {
+        manageTabIds.forEach(function (id) {
+            var btn = document.getElementById(id);
+            if (!btn) {
+                return;
             }
-        }
-        return true;
+            btn.disabled = !on;
+            btn.setAttribute('aria-disabled', on ? 'false' : 'true');
+            btn.classList.toggle('disabled', !on);
+        });
     }
 
-    var controlsIntf = document.getElementById('controlsInterfaceSelect');
-    var controlsAdminUp = document.getElementById('controlsAdminUp');
-    var controlsAdminDown = document.getElementById('controlsAdminDown');
-    function syncControlsAdminRadios() {
-        if (!controlsIntf || !controlsAdminUp || !controlsAdminDown) {
+    function showConfigTabPane() {
+        var configBtn = document.getElementById('manage-config-tab');
+        if (!configBtn || !window.bootstrap || !bootstrap.Tab) {
             return;
         }
-        var opt = controlsIntf.options[controlsIntf.selectedIndex];
+        configBtn.disabled = false;
+        configBtn.classList.remove('disabled');
+        bootstrap.Tab.getOrCreateInstance(configBtn).show();
+    }
+
+    function syncControlsAdminRadios() {
+        if (!sharedInterfaceSelect || !controlsAdminUp || !controlsAdminDown) {
+            return;
+        }
+        var opt = sharedInterfaceSelect.options[sharedInterfaceSelect.selectedIndex];
         if (!opt || !opt.value) {
             controlsAdminUp.checked = false;
             controlsAdminDown.checked = false;
@@ -277,9 +226,123 @@
             controlsAdminDown.checked = true;
         }
     }
-    if (controlsIntf && controlsAdminUp && controlsAdminDown) {
-        controlsIntf.addEventListener('change', syncControlsAdminRadios);
+
+    function updateUI() {
+        if (!modeSelect || !accessUI || !trunkUI) {
+            return;
+        }
+        var mode = modeSelect.value;
+        if (mode === 'access') {
+            accessUI.style.display = 'block';
+            trunkUI.style.display = 'none';
+        } else {
+            accessUI.style.display = 'none';
+            trunkUI.style.display = 'block';
+        }
+    }
+
+    function onSharedInterfaceChange() {
+        if (!sharedInterfaceSelect) {
+            return;
+        }
+        var v = sharedInterfaceSelect.value;
+        if (configInterfaceHidden) {
+            configInterfaceHidden.value = v;
+        }
+        if (controlsInterfaceHidden) {
+            controlsInterfaceHidden.value = v;
+        }
+
+        if (!v) {
+            setManagedTabsEnabled(false);
+            if (detailsDiv) {
+                detailsDiv.style.display = 'none';
+            }
+            syncControlsAdminRadios();
+            showConfigTabPane();
+            setManagedTabsEnabled(false);
+            return;
+        }
+
+        setManagedTabsEnabled(true);
+
+        if (!modeSelect || !detailsDiv || !accessUI || !trunkUI || !portDesc) {
+            syncControlsAdminRadios();
+            return;
+        }
+
+        detailsDiv.style.display = 'block';
+        var selected = sharedInterfaceSelect.options[sharedInterfaceSelect.selectedIndex];
+
+        portDesc.value = selected.dataset.desc || '';
+        modeSelect.value = selected.dataset.mode === 'trunk' ? 'trunk' : 'access';
+        updateUI();
+
+        document.querySelectorAll('#accessUI input[type="radio"]').forEach(function (el) {
+            el.checked = false;
+        });
+        document.querySelectorAll('.trunk-checkbox').forEach(function (el) {
+            el.checked = false;
+        });
+
+        if (modeSelect.value === 'access') {
+            var accVlan = selected.dataset.access;
+            var radio = document.getElementById('radio_' + accVlan);
+            if (radio) {
+                radio.checked = true;
+            }
+        } else {
+            var trkVlans = (selected.dataset.trunk || '').split(',');
+            trkVlans.forEach(function (x) {
+                var check = document.getElementById('check_' + x.trim());
+                if (check) {
+                    check.checked = true;
+                }
+            });
+        }
+
         syncControlsAdminRadios();
+    }
+
+    if (sharedInterfaceSelect && modeSelect && detailsDiv && accessUI && trunkUI && portDesc) {
+        modeSelect.addEventListener('change', updateUI);
+        sharedInterfaceSelect.addEventListener('change', onSharedInterfaceChange);
+        setManagedTabsEnabled(false);
+    }
+
+    function confirmSubmit() {
+        var form = document.getElementById('configForm');
+        if (!form) {
+            return;
+        }
+        var iface = (configInterfaceHidden && configInterfaceHidden.value) ||
+            (sharedInterfaceSelect && sharedInterfaceSelect.value) || '';
+        if (!iface) {
+            alert('Select an interface above first.');
+            return;
+        }
+        if (confirm("WARNING: You are about to apply these changes and persistently save the running configuration to the startup configuration. Proceed?")) {
+            form.submit();
+        }
+    }
+
+    function confirmControlsAdminSubmit(e) {
+        var form = e.target;
+        var iface = (controlsInterfaceHidden && controlsInterfaceHidden.value) ||
+            (sharedInterfaceSelect && sharedInterfaceSelect.value) || '';
+        if (!iface) {
+            e.preventDefault();
+            alert('Select an interface above first.');
+            return false;
+        }
+        var down = form.querySelector('input[name="admin_state"][value="down"]');
+        if (down && down.checked) {
+            if (!confirm("Shut down this interface? Traffic will stop until the port is enabled again.")) {
+                e.preventDefault();
+                return false;
+            }
+        }
+        return true;
     }
 </script>
 {% endblock %}
