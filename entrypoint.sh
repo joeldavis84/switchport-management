@@ -1,6 +1,6 @@
 #!/bin/bash
 # Exit immediately if a command exits with a non-zero status
-set -e 
+set -e
 
 DB_PATH="instance/switches.db"
 
@@ -16,5 +16,22 @@ else
     echo "Database successfully initialized."
 fi
 
-echo "Starting Gunicorn..."
-exec gunicorn --bind 0.0.0.0:5000 --workers 4 --threads 2 run:app
+echo "Starting Gunicorn (127.0.0.1:5000, behind nginx)..."
+gunicorn --bind 127.0.0.1:5000 --workers 4 --threads 2 run:app &
+GUNICORN_PID=$!
+
+shutdown() {
+    echo "Shutting down..."
+    nginx -s quit 2>/dev/null || true
+    kill -TERM "$GUNICORN_PID" 2>/dev/null || true
+    wait "$GUNICORN_PID" 2>/dev/null || true
+    exit 0
+}
+
+trap shutdown SIGTERM SIGINT
+
+echo "Starting nginx on port 80..."
+nginx -g "daemon off;"
+# nginx exited (e.g. crash): stop gunicorn
+kill -TERM "$GUNICORN_PID" 2>/dev/null || true
+wait "$GUNICORN_PID" 2>/dev/null || true

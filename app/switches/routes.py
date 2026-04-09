@@ -40,6 +40,14 @@ def _switch_notes_for(switch_id: int):
     )
 
 
+def _json_switch_update_payload():
+    """Parse JSON body for async manage POSTs; returns dict or None if not JSON."""
+    if not request.is_json:
+        return None
+    body = request.get_json(silent=True)
+    return body if isinstance(body, dict) else None
+
+
 @switches_bp.route('/manage/<int:id>', methods=['GET'])
 def manage_switch(id):
     switch = Switch.query.get_or_404(id)
@@ -56,14 +64,36 @@ def manage_switch(id):
 @switches_bp.route('/manage/<int:id>/notes', methods=['POST'])
 def switch_note_add(id):
     switch = Switch.query.get_or_404(id)
-    body = (request.form.get('body') or '').strip()
-    if body:
-        db.session.add(SwitchNote(switch_id=switch.id, body=body))
-        db.session.commit()
-        flash("Note added.", "success")
+    json_body = _json_switch_update_payload()
+    if json_body is not None:
+        body = (json_body.get("body") or "").strip()
     else:
+        body = (request.form.get("body") or "").strip()
+
+    if not body:
+        if json_body is not None:
+            return jsonify({"ok": False, "error": "Note text cannot be empty."})
         flash("Note text cannot be empty.", "warning")
-    return redirect(url_for('switches.manage_switch', id=switch.id))
+        return redirect(url_for("switches.manage_switch", id=switch.id))
+
+    note = SwitchNote(switch_id=switch.id, body=body)
+    db.session.add(note)
+    db.session.commit()
+
+    if json_body is not None:
+        return jsonify(
+            {
+                "ok": True,
+                "message": "Note added.",
+                "note": {
+                    "id": note.id,
+                    "body": note.body,
+                    "created_at": note.created_at.strftime("%Y-%m-%d %H:%M UTC"),
+                },
+            }
+        )
+    flash("Note added.", "success")
+    return redirect(url_for("switches.manage_switch", id=switch.id))
 
 
 @switches_bp.route('/manage/<int:id>/notes/<int:note_id>/delete', methods=['POST'])
@@ -76,13 +106,6 @@ def switch_note_delete(id, note_id):
     db.session.commit()
     flash("Note removed.", "success")
     return redirect(url_for('switches.manage_switch', id=switch.id))
-
-def _json_switch_update_payload():
-    """Parse JSON body for async manage POSTs; returns dict or None if not JSON."""
-    if not request.is_json:
-        return None
-    body = request.get_json(silent=True)
-    return body if isinstance(body, dict) else None
 
 
 @switches_bp.route('/manage/<int:id>/update', methods=['POST'])

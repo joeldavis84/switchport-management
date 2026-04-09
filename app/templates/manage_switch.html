@@ -118,9 +118,9 @@
     <div class="tab-pane fade" id="manageNotesPane" role="tabpanel" aria-labelledby="manage-notes-tab" tabindex="0">
         <p class="text-muted small">Stored in this application’s database for this switch. Visible to anyone who can open this page.</p>
 
-        <ul class="list-group mb-3">
+        <ul class="list-group mb-3" id="switchNotesList">
             {% for note in switch_notes %}
-            <li class="list-group-item">
+            <li class="list-group-item" data-note-id="{{ note.id }}">
                 <div class="d-flex justify-content-between align-items-start gap-2">
                     <div class="flex-grow-1 min-w-0">
                         <div class="text-muted small mb-1">{{ note.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</div>
@@ -132,11 +132,11 @@
                 </div>
             </li>
             {% else %}
-            <li class="list-group-item text-muted">No notes yet.</li>
+            <li class="list-group-item text-muted" id="switchNotesEmpty">No notes yet.</li>
             {% endfor %}
         </ul>
 
-        <form method="post" action="{{ url_for('switches.switch_note_add', id=switch.id) }}" class="mb-0">
+        <form method="post" action="{{ url_for('switches.switch_note_add', id=switch.id) }}" class="mb-0" id="switchNoteAddForm">
             <label for="switchNoteBody" class="form-label">Add a note</label>
             <textarea class="form-control mb-2" id="switchNoteBody" name="body" rows="3" placeholder="Enter text…"></textarea>
             <button type="submit" class="btn btn-primary">Save note</button>
@@ -165,6 +165,8 @@
     const switchId = "{{ switch.id }}";
     const updateSwitchJsonUrl = {{ url_for('switches.update_switch', id=switch.id)|tojson }};
     const interfaceAdminJsonUrl = {{ url_for('switches.set_interface_admin', id=switch.id)|tojson }};
+    const switchNoteAddUrl = {{ url_for('switches.switch_note_add', id=switch.id)|tojson }};
+    const switchNoteDeleteUrlTpl = {{ url_for('switches.switch_note_delete', id=switch.id, note_id=0)|tojson }};
 
     var manageWorkModalInstance = null;
     function showWorkModal(message) {
@@ -253,6 +255,90 @@
             return Promise.reject(new Error('not json'));
         }
         return r.json();
+    }
+
+    function switchNoteDeleteUrl(noteId) {
+        return switchNoteDeleteUrlTpl.replace(/\/notes\/0\/delete$/, '/notes/' + noteId + '/delete');
+    }
+
+    function appendSwitchNoteListItem(note) {
+        var ul = document.getElementById('switchNotesList');
+        if (!ul || !note) {
+            return;
+        }
+        var empty = document.getElementById('switchNotesEmpty');
+        if (empty) {
+            empty.remove();
+        }
+        var li = document.createElement('li');
+        li.className = 'list-group-item';
+        li.setAttribute('data-note-id', String(note.id));
+        var outer = document.createElement('div');
+        outer.className = 'd-flex justify-content-between align-items-start gap-2';
+        var inner = document.createElement('div');
+        inner.className = 'flex-grow-1 min-w-0';
+        var meta = document.createElement('div');
+        meta.className = 'text-muted small mb-1';
+        meta.textContent = note.created_at || '';
+        var bodyEl = document.createElement('div');
+        bodyEl.className = 'text-break';
+        bodyEl.style.whiteSpace = 'pre-wrap';
+        bodyEl.textContent = note.body || '';
+        inner.appendChild(meta);
+        inner.appendChild(bodyEl);
+        var form = document.createElement('form');
+        form.method = 'post';
+        form.action = switchNoteDeleteUrl(note.id);
+        form.className = 'flex-shrink-0';
+        var btn = document.createElement('button');
+        btn.type = 'submit';
+        btn.className = 'btn btn-sm btn-outline-danger';
+        btn.textContent = 'Remove';
+        form.appendChild(btn);
+        outer.appendChild(inner);
+        outer.appendChild(form);
+        li.appendChild(outer);
+        ul.appendChild(li);
+    }
+
+    var switchNoteAddForm = document.getElementById('switchNoteAddForm');
+    if (switchNoteAddForm) {
+        switchNoteAddForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var ta = document.getElementById('switchNoteBody');
+            var text = (ta && ta.value || '').trim();
+            if (!text) {
+                alert('Note text cannot be empty.');
+                return;
+            }
+            showWorkModal('Saving note…');
+            fetch(switchNoteAddUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json'
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ body: text })
+            })
+                .then(parseJsonResponse)
+                .then(function (data) {
+                    hideWorkModal();
+                    if (data.ok && data.note) {
+                        if (ta) {
+                            ta.value = '';
+                        }
+                        appendSwitchNoteListItem(data.note);
+                        showManageFeedback('success', data.message || 'Note added.');
+                    } else {
+                        showManageFeedback('danger', data.error || 'Could not save note.');
+                    }
+                })
+                .catch(function () {
+                    hideWorkModal();
+                    showManageFeedback('danger', 'Could not reach the server or the response was invalid.');
+                });
+        });
     }
 
     // 10-second polling for config updates
