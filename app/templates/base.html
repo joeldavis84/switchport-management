@@ -15,13 +15,21 @@
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
             {% for category, message in messages %}
-              <div class="alert alert-{{ category }}">{{ message }}</div>
+              <div class="alert alert-{{ category }}{% if category == 'success' %} fade show{% endif %}" role="alert">{{ message }}</div>
             {% endfor %}
           {% endif %}
         {% endwith %}
         {% block content %}{% endblock %}
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      document.querySelectorAll('.alert-success').forEach(function (el) {
+        setTimeout(function () {
+          var instance = bootstrap.Alert.getOrCreateInstance(el);
+          instance.close();
+        }, 2000);
+      });
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
