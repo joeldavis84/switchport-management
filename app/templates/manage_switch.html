@@ -15,91 +15,103 @@
 
 <hr>
 
-{% if not data.hash %}
-    <div class="alert alert-danger">{{ data.error or "Could not load switch data (no error detail was recorded)." }}</div>
-{% else %}
-    <form method="POST" action="{{ url_for('switches.update_switch', id=switch.id) }}" id="configForm">
-        <div class="mb-3">
-            <label class="form-label">Select Interface</label>
-            <select class="form-select" name="interface" id="interfaceSelect" required>
-                <option value="">-- Choose an Interface --</option>
-                {% for intf in data.interfaces %}
-                <option value="{{ intf.name }}" 
-                        data-desc="{{ intf.description }}" 
-                        data-mode="{{ intf.mode }}" 
-                        data-access="{{ intf.access_vlan }}" 
-                        data-trunk="{{ intf.trunk_vlans }}">
-		{{ intf.name }} ({{ intf.description }})
-                </option>
-                {% endfor %}
-            </select>
-        </div>
-
-        <div id="interfaceDetails" style="display:none;">
+<ul class="nav nav-tabs" id="manageSwitchTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="manage-config-tab" data-bs-toggle="tab" data-bs-target="#manageConfigPane" type="button" role="tab" aria-controls="manageConfigPane" aria-selected="true">Switch port configuration</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="manage-notes-tab" data-bs-toggle="tab" data-bs-target="#manageNotesPane" type="button" role="tab" aria-controls="manageNotesPane" aria-selected="false">Notes</button>
+    </li>
+</ul>
+<div class="tab-content border border-top-0 rounded-bottom p-3 mb-4" id="manageSwitchTabContent">
+    <div class="tab-pane fade show active" id="manageConfigPane" role="tabpanel" aria-labelledby="manage-config-tab" tabindex="0">
+        {% if not data.hash %}
+        <div class="alert alert-danger mb-0">{{ data.error or "Could not load switch data (no error detail was recorded)." }}</div>
+        {% else %}
+        <form method="POST" action="{{ url_for('switches.update_switch', id=switch.id) }}" id="configForm">
             <div class="mb-3">
-                <label class="form-label">Description</label>
-                <input type="text" class="form-control" name="description" id="portDesc">
-            </div>
-
-            <div class="mb-3">
-                <label class="form-label">Switchport Mode</label>
-                <select class="form-select" name="mode" id="modeSelect">
-                    <option value="access">Access</option>
-                    <option value="trunk">Trunk</option>
+                <label class="form-label">Select Interface</label>
+                <select class="form-select" name="interface" id="interfaceSelect" required>
+                    <option value="">-- Choose an Interface --</option>
+                    {% for intf in data.interfaces %}
+                    <option value="{{ intf.name }}"
+                            data-desc="{{ intf.description }}"
+                            data-mode="{{ intf.mode }}"
+                            data-access="{{ intf.access_vlan }}"
+                            data-trunk="{{ intf.trunk_vlans }}">
+                        {{ intf.name }} ({{ intf.description }})
+                    </option>
+                    {% endfor %}
                 </select>
             </div>
 
-            <div class="mb-3" id="accessUI">
-                <label class="form-label">Access VLAN (Select One)</label>
-                {% for vlan in data.vlans %}
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="access_vlan" value="{{ vlan.id }}" id="radio_{{ vlan.id }}">
-                    <label class="form-check-label" for="radio_{{ vlan.id }}">VLAN {{ vlan.id }} ({{ vlan.name }})</label>
+            <div id="interfaceDetails" style="display:none;">
+                <div class="mb-3">
+                    <label class="form-label">Description</label>
+                    <input type="text" class="form-control" name="description" id="portDesc">
                 </div>
-                {% endfor %}
-            </div>
 
-            <div class="mb-3" id="trunkUI" style="display:none;">
-                <label class="form-label">Trunk Allowed VLANs</label>
-                {% for vlan in data.vlans %}
-                <div class="form-check">
-                    <input class="form-check-input trunk-checkbox" type="checkbox" name="trunk_vlans" value="{{ vlan.id }}" id="check_{{ vlan.id }}">
-                    <label class="form-check-label" for="check_{{ vlan.id }}">VLAN {{ vlan.id }} ({{ vlan.name }})</label>
+                <div class="mb-3">
+                    <label class="form-label">Switchport Mode</label>
+                    <select class="form-select" name="mode" id="modeSelect">
+                        <option value="access">Access</option>
+                        <option value="trunk">Trunk</option>
+                    </select>
                 </div>
-                {% endfor %}
+
+                <div class="mb-3" id="accessUI">
+                    <label class="form-label">Access VLAN (Select One)</label>
+                    {% for vlan in data.vlans %}
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="access_vlan" value="{{ vlan.id }}" id="radio_{{ vlan.id }}">
+                        <label class="form-check-label" for="radio_{{ vlan.id }}">VLAN {{ vlan.id }} ({{ vlan.name }})</label>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <div class="mb-3" id="trunkUI" style="display:none;">
+                    <label class="form-label">Trunk Allowed VLANs</label>
+                    {% for vlan in data.vlans %}
+                    <div class="form-check">
+                        <input class="form-check-input trunk-checkbox" type="checkbox" name="trunk_vlans" value="{{ vlan.id }}" id="check_{{ vlan.id }}">
+                        <label class="form-check-label" for="check_{{ vlan.id }}">VLAN {{ vlan.id }} ({{ vlan.name }})</label>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <button type="button" class="btn btn-warning" onclick="confirmSubmit()">Apply & Save Configuration</button>
             </div>
+        </form>
+        {% endif %}
+    </div>
+    <div class="tab-pane fade" id="manageNotesPane" role="tabpanel" aria-labelledby="manage-notes-tab" tabindex="0">
+        <p class="text-muted small">Stored in this application’s database for this switch. Visible to anyone who can open this page.</p>
 
-            <button type="button" class="btn btn-warning" onclick="confirmSubmit()">Apply & Save Configuration</button>
-        </div>
-    </form>
-{% endif %}
+        <ul class="list-group mb-3">
+            {% for note in switch_notes %}
+            <li class="list-group-item">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div class="flex-grow-1 min-w-0">
+                        <div class="text-muted small mb-1">{{ note.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</div>
+                        <div class="text-break" style="white-space: pre-wrap;">{{ note.body }}</div>
+                    </div>
+                    <form method="post" action="{{ url_for('switches.switch_note_delete', id=switch.id, note_id=note.id) }}" class="flex-shrink-0">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                    </form>
+                </div>
+            </li>
+            {% else %}
+            <li class="list-group-item text-muted">No notes yet.</li>
+            {% endfor %}
+        </ul>
 
-<h3 class="h5 mt-4">Notes</h3>
-<p class="text-muted small">Stored in this application’s database for this switch. Visible to anyone who can open this page.</p>
-
-<ul class="list-group mb-3">
-    {% for note in switch_notes %}
-    <li class="list-group-item">
-        <div class="d-flex justify-content-between align-items-start gap-2">
-            <div class="flex-grow-1 min-w-0">
-                <div class="text-muted small mb-1">{{ note.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</div>
-                <div class="text-break" style="white-space: pre-wrap;">{{ note.body }}</div>
-            </div>
-            <form method="post" action="{{ url_for('switches.switch_note_delete', id=switch.id, note_id=note.id) }}" class="flex-shrink-0">
-                <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
-            </form>
-        </div>
-    </li>
-    {% else %}
-    <li class="list-group-item text-muted">No notes yet.</li>
-    {% endfor %}
-</ul>
-
-<form method="post" action="{{ url_for('switches.switch_note_add', id=switch.id) }}" class="mb-3">
-    <label for="switchNoteBody" class="form-label">Add a note</label>
-    <textarea class="form-control mb-2" id="switchNoteBody" name="body" rows="3" placeholder="Enter text…"></textarea>
-    <button type="submit" class="btn btn-primary">Save note</button>
-</form>
+        <form method="post" action="{{ url_for('switches.switch_note_add', id=switch.id) }}" class="mb-0">
+            <label for="switchNoteBody" class="form-label">Add a note</label>
+            <textarea class="form-control mb-2" id="switchNoteBody" name="body" rows="3" placeholder="Enter text…"></textarea>
+            <button type="submit" class="btn btn-primary">Save note</button>
+        </form>
+    </div>
+</div>
 
 {% endblock %}
 
@@ -133,6 +145,9 @@
     const portDesc = document.getElementById('portDesc');
 
     function updateUI() {
+        if (!modeSelect || !accessUI || !trunkUI) {
+            return;
+        }
         const mode = modeSelect.value;
         if (mode === 'access') {
             accessUI.style.display = 'block';
@@ -143,6 +158,7 @@
         }
     }
 
+    if (intfSelect && modeSelect && detailsDiv && accessUI && trunkUI && portDesc) {
     modeSelect.addEventListener('change', updateUI);
 
     intfSelect.addEventListener('change', function() {
@@ -177,10 +193,15 @@
             });
         }
     });
+    }
 
     function confirmSubmit() {
+        var form = document.getElementById('configForm');
+        if (!form) {
+            return;
+        }
         if (confirm("WARNING: You are about to apply these changes and persistently save the running configuration to the startup configuration. Proceed?")) {
-            document.getElementById('configForm').submit();
+            form.submit();
         }
     }
 </script>
