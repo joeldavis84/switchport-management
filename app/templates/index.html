@@ -10,10 +10,65 @@
         <div>
             <strong>{{ switch.ip_address }}</strong> - {{ switch.description }}
         </div>
-        <a href="{{ url_for('switches.manage_switch', id=switch.id) }}" class="btn btn-sm btn-outline-primary">Manage</a>
+        <a href="{{ url_for('switches.manage_switch', id=switch.id) }}" class="btn btn-sm btn-outline-primary js-manage-switch-link">Manage</a>
     </li>
     {% else %}
     <li class="list-group-item">No switches configured.</li>
     {% endfor %}
 </ul>
+
+<div class="modal fade" id="manageProgressModal" tabindex="-1" role="dialog" aria-labelledby="manageProgressModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered" role="document">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title" id="manageProgressModalLabel">Opening manage view…</h5>
+            </div>
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-primary mb-3" role="status" aria-label="Loading">
+                    <span class="visually-hidden">Loading…</span>
+                </div>
+                <p class="text-muted mb-0 small">Please wait while this switch page loads.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var modalEl = document.getElementById('manageProgressModal');
+    if (!modalEl || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+        return;
+    }
+    var modal = bootstrap.Modal.getOrCreateInstance(modalEl, {
+        backdrop: 'static',
+        keyboard: false
+    });
+    document.querySelectorAll('a.js-manage-switch-link').forEach(function (link) {
+        link.addEventListener('click', function (e) {
+            if (e.defaultPrevented) {
+                return;
+            }
+            if (e.button !== 0) {
+                return;
+            }
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+                return;
+            }
+            var href = link.getAttribute('href');
+            if (!href) {
+                return;
+            }
+            e.preventDefault();
+            modal.show();
+            requestAnimationFrame(function () {
+                requestAnimationFrame(function () {
+                    window.location.href = href;
+                });
+            });
+        });
+    });
+})();
+</script>
 {% endblock %}
