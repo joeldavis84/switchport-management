@@ -89,7 +89,7 @@
                     {% endfor %}
                 </div>
 
-                <button type="button" class="btn btn-warning" onclick="confirmSubmit()">Apply & Save Configuration</button>
+                <button type="button" class="btn btn-danger" onclick="confirmSubmit()">Apply & Save Configuration</button>
             </div>
         </form>
         {% endif %}
@@ -104,18 +104,11 @@
               id="controlsAdminForm"
               onsubmit="return confirmControlsAdminSubmit(event)">
             <input type="hidden" name="interface" id="controlsInterfaceHidden" value="">
-            <fieldset class="mb-3">
-                <legend class="form-label fs-6 mb-2">Admin state</legend>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="admin_state" id="controlsAdminUp" value="up">
-                    <label class="form-check-label" for="controlsAdminUp">Enable (no shutdown)</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="admin_state" id="controlsAdminDown" value="down">
-                    <label class="form-check-label" for="controlsAdminDown">Disable (shutdown)</label>
-                </div>
-            </fieldset>
-            <button type="submit" class="btn btn-primary">Apply admin state</button>
+            <div class="d-flex flex-wrap gap-2">
+                <button type="submit" name="admin_state" value="up" class="btn btn-success">Enable (no shutdown)</button>
+                <button type="submit" name="admin_state" value="down" class="btn btn-danger"
+                        onclick="return confirm('Shut down this interface? Traffic will stop until the port is enabled again.');">Disable (shutdown)</button>
+            </div>
         </form>
         {% endif %}
     </div>
@@ -180,8 +173,6 @@
     const accessUI = document.getElementById('accessUI');
     const trunkUI = document.getElementById('trunkUI');
     const portDesc = document.getElementById('portDesc');
-    const controlsAdminUp = document.getElementById('controlsAdminUp');
-    const controlsAdminDown = document.getElementById('controlsAdminDown');
 
     var manageTabIds = ['manage-config-tab', 'manage-controls-tab', 'manage-notes-tab'];
 
@@ -205,26 +196,6 @@
         configBtn.disabled = false;
         configBtn.classList.remove('disabled');
         bootstrap.Tab.getOrCreateInstance(configBtn).show();
-    }
-
-    function syncControlsAdminRadios() {
-        if (!sharedInterfaceSelect || !controlsAdminUp || !controlsAdminDown) {
-            return;
-        }
-        var opt = sharedInterfaceSelect.options[sharedInterfaceSelect.selectedIndex];
-        if (!opt || !opt.value) {
-            controlsAdminUp.checked = false;
-            controlsAdminDown.checked = false;
-            return;
-        }
-        var up = opt.getAttribute('data-admin-up') === 'true';
-        if (up) {
-            controlsAdminUp.checked = true;
-            controlsAdminDown.checked = false;
-        } else {
-            controlsAdminUp.checked = false;
-            controlsAdminDown.checked = true;
-        }
     }
 
     function updateUI() {
@@ -258,7 +229,6 @@
             if (detailsDiv) {
                 detailsDiv.style.display = 'none';
             }
-            syncControlsAdminRadios();
             showConfigTabPane();
             setManagedTabsEnabled(false);
             return;
@@ -267,7 +237,6 @@
         setManagedTabsEnabled(true);
 
         if (!modeSelect || !detailsDiv || !accessUI || !trunkUI || !portDesc) {
-            syncControlsAdminRadios();
             return;
         }
 
@@ -300,8 +269,6 @@
                 }
             });
         }
-
-        syncControlsAdminRadios();
     }
 
     if (sharedInterfaceSelect && modeSelect && detailsDiv && accessUI && trunkUI && portDesc) {
@@ -327,20 +294,12 @@
     }
 
     function confirmControlsAdminSubmit(e) {
-        var form = e.target;
         var iface = (controlsInterfaceHidden && controlsInterfaceHidden.value) ||
             (sharedInterfaceSelect && sharedInterfaceSelect.value) || '';
         if (!iface) {
             e.preventDefault();
             alert('Select an interface above first.');
             return false;
-        }
-        var down = form.querySelector('input[name="admin_state"][value="down"]');
-        if (down && down.checked) {
-            if (!confirm("Shut down this interface? Traffic will stop until the port is enabled again.")) {
-                e.preventDefault();
-                return false;
-            }
         }
         return true;
     }
