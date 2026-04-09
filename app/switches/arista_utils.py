@@ -201,7 +201,7 @@ def get_arp_table(ip, username):
 def get_switch_logging_last(
     ip: str, username: str, last_n: int = 50
 ) -> Tuple[Optional[str], Optional[str]]:
-    """Runs `show logging last <n>` on the switch (EOS)."""
+    """Runs `show logging <n>` on the switch (EOS)."""
     try:
         n = max(1, min(int(last_n), 500))
     except (TypeError, ValueError):
@@ -210,7 +210,7 @@ def get_switch_logging_last(
         with get_connection(ip, username) as net_connect:
             net_connect.enable()
             out = net_connect.send_command(
-                f"show logging last {n}",
+                f"show logging {n}",
                 read_timeout=120,
             )
             text = (out or "").strip() if out is not None else ""
