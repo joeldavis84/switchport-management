@@ -2,6 +2,7 @@ import errno
 import hashlib
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import paramiko
@@ -80,6 +81,20 @@ def get_connection(ip, username):
         allow_agent=True,
     )
 
+def _ethernet_interface_sort_key(name: str) -> Tuple[int, int, str]:
+    """
+    Sort key for names like Ethernet1/3: first by the number before '/', then by
+    the number immediately after the first '/'. Names without a slash use port 0.
+    """
+    m = re.match(r"^Ethernet(\d+)/(\d+)", name, re.IGNORECASE)
+    if m:
+        return (int(m.group(1)), int(m.group(2)), "")
+    m = re.match(r"^Ethernet(\d+)\s*$", name, re.IGNORECASE)
+    if m:
+        return (int(m.group(1)), 0, "")
+    return (2**31, 2**31, name.lower())
+
+
 def get_config_hash(ip, username):
     try:
         with get_connection(ip, username) as net_connect:
@@ -134,6 +149,10 @@ def get_switch_data(ip, username):
                     'trunk_vlans': trunk_vlans,
                     'admin_up': admin_up,
                 })
+
+            data["interfaces"].sort(
+                key=lambda row: _ethernet_interface_sort_key(row["name"])
+            )
     except json.JSONDecodeError as e:
         data['error'] = (
             f"SSH to {ip} worked, but switch output was not valid JSON (position {e.pos}). "
