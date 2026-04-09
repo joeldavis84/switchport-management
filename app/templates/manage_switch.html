@@ -6,6 +6,7 @@
     <div class="btn-group" role="group" aria-label="Switch read-only views">
         <a href="{{ url_for('switches.vlan_table', id=switch.id) }}" class="btn btn-outline-secondary">View VLANs</a>
         <a href="{{ url_for('switches.arp_table', id=switch.id) }}" class="btn btn-info">View ARP table</a>
+        <a href="{{ url_for('switches.switch_logs', id=switch.id) }}" class="btn btn-outline-dark">View logs</a>
     </div>
 </div>
 

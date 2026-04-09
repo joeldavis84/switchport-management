@@ -198,6 +198,29 @@ def get_arp_table(ip, username):
         return [], msg
 
 
+def get_switch_logging_last(
+    ip: str, username: str, last_n: int = 50
+) -> Tuple[Optional[str], Optional[str]]:
+    """Runs `show logging last <n>` on the switch (EOS)."""
+    try:
+        n = max(1, min(int(last_n), 500))
+    except (TypeError, ValueError):
+        n = 50
+    try:
+        with get_connection(ip, username) as net_connect:
+            net_connect.enable()
+            out = net_connect.send_command(
+                f"show logging last {n}",
+                read_timeout=120,
+            )
+            text = (out or "").strip() if out is not None else ""
+            return text, None
+    except Exception as e:
+        msg = format_connection_error(ip, username, e)
+        logger.warning("get_switch_logging_last failed for %s: %s", ip, msg)
+        return None, msg
+
+
 def _vlan_sort_key(row: Dict[str, Any]) -> int:
     vid = row.get("id", "0")
     try:

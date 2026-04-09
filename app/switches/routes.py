@@ -6,6 +6,7 @@ from .arista_utils import (
     get_arp_table,
     get_config_hash,
     get_switch_data,
+    get_switch_logging_last,
     get_vlan_detail,
     get_vlan_table,
     push_switch_config,
@@ -117,6 +118,35 @@ def arp_table(id):
         arp_data=arp_data,
         connection_error=connection_error,
     )
+
+
+LOG_TAIL_LINES = 50
+
+
+@switches_bp.route('/manage/<int:id>/logs', methods=['GET'])
+def switch_logs(id):
+    switch = Switch.query.get_or_404(id)
+    initial_log, initial_error = get_switch_logging_last(
+        switch.ip_address, switch.username, LOG_TAIL_LINES
+    )
+    return render_template(
+        'switch_logs.html',
+        switch=switch,
+        initial_log=initial_log if initial_log is not None else "",
+        initial_error=initial_error,
+        log_tail_lines=LOG_TAIL_LINES,
+    )
+
+
+@switches_bp.route('/manage/<int:id>/logs/poll', methods=['GET'])
+def switch_logs_poll(id):
+    switch = Switch.query.get_or_404(id)
+    log_text, log_err = get_switch_logging_last(
+        switch.ip_address, switch.username, LOG_TAIL_LINES
+    )
+    if log_err:
+        return jsonify({"log": "", "error": log_err})
+    return jsonify({"log": log_text or "", "error": None})
 
 
 @switches_bp.route('/manage/<int:id>/vlans', methods=['GET'])
