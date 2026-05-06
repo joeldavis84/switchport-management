@@ -76,6 +76,9 @@
     <li class="nav-item" role="presentation">
         <button class="nav-link" id="manage-notes-tab" data-bs-toggle="tab" data-bs-target="#manageNotesPane" type="button" role="tab" aria-controls="manageNotesPane" aria-selected="false">Switch Notes</button>
     </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="manage-dns-tab" data-bs-toggle="tab" data-bs-target="#manageDnsPane" type="button" role="tab" aria-controls="manageDnsPane" aria-selected="false">DNS management</button>
+    </li>
 </ul>
 <div class="tab-content border border-top-0 rounded-bottom p-3 mb-4" id="manageSwitchTabContent">
     <div class="tab-pane fade show active" id="manageConfigPane" role="tabpanel" aria-labelledby="manage-config-tab" tabindex="0">
@@ -168,6 +171,26 @@
             <button type="submit" class="btn btn-primary">Save note</button>
         </form>
     </div>
+    <div class="tab-pane fade" id="manageDnsPane" role="tabpanel" aria-labelledby="manage-dns-tab" tabindex="0">
+        <p class="text-muted small">Configure global DNS for the default (non-VRF) context using <code>ip name-server vrf default …</code> and <code>ip domain-list …</code>. This tab never uses the interface selector or port forms. Applying replaces existing global name servers and domain search entries read from the switch, commits with <code>write memory</code>, and appends verification output below.</p>
+        <div id="dnsLoadError" class="alert alert-warning d-none mb-3" role="alert"></div>
+        <form id="dnsGlobalForm" class="mb-4">
+            <div class="mb-3">
+                <label for="dnsNameServersInput" class="form-label">Name servers <span class="text-muted fw-normal">(IPv4 or IPv6, one per line)</span></label>
+                <textarea class="form-control font-monospace" id="dnsNameServersInput" rows="4" spellcheck="false" placeholder="9.9.9.9&#10;2001:4860:4860::8888" autocomplete="off"></textarea>
+                <div class="invalid-feedback" id="dnsNameServersFeedback">Every non-empty line must be a valid IPv4 or IPv6 address.</div>
+            </div>
+            <div class="mb-3">
+                <label for="dnsDomainSearchInput" class="form-label">Domain search list <span class="text-muted fw-normal">(one domain per line)</span></label>
+                <textarea class="form-control font-monospace" id="dnsDomainSearchInput" rows="5" spellcheck="false" placeholder="corp.example.com&#10;internal" autocomplete="off"></textarea>
+                <div class="invalid-feedback" id="dnsDomainSearchFeedback">Every non-empty line must be a valid domain (short name or FQDN; ASCII letters, digits, hyphen).</div>
+            </div>
+            <button type="submit" class="btn btn-primary" id="dnsApplyBtn">Apply DNS settings</button>
+        </form>
+        <hr class="my-4">
+        <h3 class="h6">Switch CLI output</h3>
+        <pre id="dnsCliOutputPre" class="border rounded p-3 small mb-0 bg-body-secondary text-body" style="white-space: pre-wrap; max-height: 45vh; overflow: auto;">Open this tab to load current DNS from the switch. After you apply, configuration and verification output appears here.</pre>
+    </div>
 </div>
 
 <div id="manageWorkOverlay" class="d-none" aria-hidden="true" role="status" aria-live="polite">
@@ -187,6 +210,7 @@
     const interfaceAdminJsonUrl = {{ url_for('switches.set_interface_admin', id=switch.id)|tojson }};
     const switchNoteAddUrl = {{ url_for('switches.switch_note_add', id=switch.id)|tojson }};
     const switchNoteDeleteUrlTpl = {{ url_for('switches.switch_note_delete', id=switch.id, note_id=0)|tojson }};
+    const dnsManageUrl = {{ url_for('switches.manage_switch_dns', id=switch.id)|tojson }};
 
     function manageWorkOverlayEl() {
         return document.getElementById('manageWorkOverlay');
@@ -679,6 +703,230 @@
                     }
                 })
                 .catch(function () {
+                    showManageFeedback('danger', 'Could not reach the server or the response was invalid.');
+                })
+                .finally(hideWorkModal);
+        });
+    }
+
+    function dnsLooksLikeIp(s) {
+        s = String(s || '').trim();
+        if (!s || s.length > 128) {
+            return false;
+        }
+        if (s.indexOf('%') !== -1 || s.indexOf('/') !== -1) {
+            return false;
+        }
+        var v4 = /^(\d{1,3}\.){3}\d{1,3}$/;
+        if (v4.test(s)) {
+            return s.split('.').every(function (part) {
+                if (!/^\d{1,3}$/.test(part)) {
+                    return false;
+                }
+                var n = parseInt(part, 10);
+                return n >= 0 && n <= 255;
+            });
+        }
+        if (s.indexOf(':') !== -1 && /^[0-9a-fA-F:]+$/.test(s)) {
+            return true;
+        }
+        return false;
+    }
+
+    function dnsLabelOk(label) {
+        if (!label || label.length > 63) {
+            return false;
+        }
+        if (label[0] === '-' || label[label.length - 1] === '-') {
+            return false;
+        }
+        return /^[A-Za-z0-9-]+$/.test(label);
+    }
+
+    function dnsValidHostnameOrFqdn(s) {
+        s = String(s || '').trim();
+        if (!s || s.length > 253) {
+            return false;
+        }
+        if (!/^[A-Za-z0-9.-]+$/.test(s)) {
+            return false;
+        }
+        if (s.indexOf('..') !== -1) {
+            return false;
+        }
+        if (s.indexOf('.') === -1) {
+            return dnsLabelOk(s);
+        }
+        var body = s.replace(/\.+$/, '');
+        if (!body) {
+            return false;
+        }
+        if (body.indexOf('.') !== -1) {
+            var labels = body.split('.');
+            for (var i = 0; i < labels.length; i++) {
+                if (!labels[i] || !dnsLabelOk(labels[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return /\.+$/.test(s) && dnsLabelOk(body);
+    }
+
+    function dnsNonEmptyLinesFromTextarea(el) {
+        if (!el || !el.value) {
+            return [];
+        }
+        return el.value.split(/\r?\n/).map(function (ln) {
+            return ln.trim();
+        }).filter(function (ln) {
+            return ln.length > 0;
+        });
+    }
+
+    function clearDnsFieldErrors() {
+        var nsIn = document.getElementById('dnsNameServersInput');
+        var domIn = document.getElementById('dnsDomainSearchInput');
+        if (nsIn) {
+            nsIn.classList.remove('is-invalid');
+        }
+        if (domIn) {
+            domIn.classList.remove('is-invalid');
+        }
+    }
+
+    function validateDnsClient() {
+        clearDnsFieldErrors();
+        var nsIn = document.getElementById('dnsNameServersInput');
+        var domIn = document.getElementById('dnsDomainSearchInput');
+        var nsLines = dnsNonEmptyLinesFromTextarea(nsIn);
+        var i;
+        for (i = 0; i < nsLines.length; i++) {
+            if (!dnsLooksLikeIp(nsLines[i])) {
+                if (nsIn) {
+                    nsIn.classList.add('is-invalid');
+                }
+                return false;
+            }
+        }
+        var domLines = dnsNonEmptyLinesFromTextarea(domIn);
+        for (i = 0; i < domLines.length; i++) {
+            if (!dnsValidHostnameOrFqdn(domLines[i])) {
+                if (domIn) {
+                    domIn.classList.add('is-invalid');
+                }
+                return false;
+            }
+        }
+        return true;
+    }
+
+    function setDnsLoadError(msg) {
+        var el = document.getElementById('dnsLoadError');
+        if (!el) {
+            return;
+        }
+        if (!msg) {
+            el.classList.add('d-none');
+            el.textContent = '';
+            return;
+        }
+        el.textContent = msg;
+        el.classList.remove('d-none');
+    }
+
+    function refreshDnsPaneFromSwitch() {
+        var nsTa = document.getElementById('dnsNameServersInput');
+        var domTa = document.getElementById('dnsDomainSearchInput');
+        if (!nsTa || !domTa) {
+            return;
+        }
+        setDnsLoadError('');
+        fetch(dnsManageUrl, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin'
+        })
+            .then(parseJsonResponse)
+            .then(function (data) {
+                if (!data || typeof data !== 'object') {
+                    setDnsLoadError('Unexpected response while loading DNS.');
+                    return;
+                }
+                if (!data.ok) {
+                    setDnsLoadError(data.error || 'Could not load DNS from the switch.');
+                    return;
+                }
+                nsTa.value = (data.name_servers || []).join('\n');
+                domTa.value = (data.domain_search || []).join('\n');
+            })
+            .catch(function () {
+                setDnsLoadError('Could not reach the server while loading DNS.');
+            });
+    }
+
+    var manageDnsTab = document.getElementById('manage-dns-tab');
+    if (manageDnsTab) {
+        manageDnsTab.addEventListener('shown.bs.tab', function () {
+            refreshDnsPaneFromSwitch();
+        });
+    }
+
+    var dnsNameServersInput = document.getElementById('dnsNameServersInput');
+    var dnsDomainSearchInput = document.getElementById('dnsDomainSearchInput');
+    if (dnsNameServersInput) {
+        dnsNameServersInput.addEventListener('input', clearDnsFieldErrors);
+    }
+    if (dnsDomainSearchInput) {
+        dnsDomainSearchInput.addEventListener('input', clearDnsFieldErrors);
+    }
+
+    var dnsGlobalForm = document.getElementById('dnsGlobalForm');
+    if (dnsGlobalForm) {
+        dnsGlobalForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            clearDnsFieldErrors();
+            if (!validateDnsClient()) {
+                return;
+            }
+            if (!confirm('Replace global (default VRF) DNS name servers and domain search list on the switch, then save to startup-config?')) {
+                return;
+            }
+            var nsTa = document.getElementById('dnsNameServersInput');
+            var domTa = document.getElementById('dnsDomainSearchInput');
+            var outPre = document.getElementById('dnsCliOutputPre');
+            var payload = {
+                name_servers: dnsNonEmptyLinesFromTextarea(nsTa),
+                domain_search: dnsNonEmptyLinesFromTextarea(domTa)
+            };
+            showWorkModal('Applying DNS on the switch…');
+            fetch(dnsManageUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json'
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify(payload)
+            })
+                .then(parseJsonResponse)
+                .then(function (data) {
+                    if (outPre) {
+                        outPre.textContent = (data && data.output) ? data.output : '(no output)';
+                    }
+                    if (data && data.ok) {
+                        showManageFeedback('success', 'DNS settings applied and saved to startup-config.');
+                        if (data.hash) {
+                            currentHash = data.hash;
+                        }
+                    } else {
+                        showManageFeedback('danger', (data && data.error) || 'DNS update failed.');
+                    }
+                })
+                .catch(function () {
+                    if (outPre) {
+                        outPre.textContent = '';
+                    }
                     showManageFeedback('danger', 'Could not reach the server or the response was invalid.');
                 })
                 .finally(hideWorkModal);

@@ -3,9 +3,11 @@ from app import db
 from app.models import Switch, SwitchNote, VlanNote
 from . import switches_bp
 from .arista_utils import (
+    apply_switch_dns_global,
     get_arp_table,
     get_config_hash,
     get_switch_data,
+    get_switch_dns_global,
     get_switch_logging_last,
     get_vlan_detail,
     get_vlan_table,
@@ -68,6 +70,43 @@ def manage_switch(id):
         data=data,
         switch_notes=notes,
     )
+
+
+@switches_bp.route("/manage/<int:id>/dns", methods=["GET", "POST"])
+def manage_switch_dns(id):
+    switch = Switch.query.get_or_404(id)
+    if request.method == "GET":
+        payload, err = get_switch_dns_global(switch.ip_address, switch.username)
+        if err:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": err,
+                    "name_servers": [],
+                    "domain_search": [],
+                }
+            )
+        return jsonify(
+            {
+                "ok": True,
+                "name_servers": payload["name_servers"],
+                "domain_search": payload["domain_search"],
+            }
+        )
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": "Expected a JSON object body."}), 400
+
+    transcript, err, new_hash = apply_switch_dns_global(
+        switch.ip_address,
+        switch.username,
+        body.get("name_servers"),
+        body.get("domain_search"),
+    )
+    if err:
+        return jsonify({"ok": False, "error": err, "output": transcript or ""})
+    return jsonify({"ok": True, "output": transcript or "", "hash": new_hash})
 
 
 @switches_bp.route('/manage/<int:id>/notes', methods=['POST'])

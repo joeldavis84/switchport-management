@@ -321,6 +321,231 @@ def run_switch_ping(
         return cmd, None, msg
 
 
+_NAME_SERVER_LINE_RE = re.compile(
+    r"^ip name-server(?:\s+vrf\s+(\S+))?\s+(\S+)\s*$",
+    re.IGNORECASE,
+)
+
+_DOMAIN_LIST_LINE_RE = re.compile(r"^ip domain-list\s+(.+)$", re.IGNORECASE)
+
+
+def _global_name_server_line_ok(vrf: Optional[str]) -> bool:
+    """True if this name-server line applies to default / global (non-VRF) context."""
+    if vrf is None:
+        return True
+    return vrf.lower() == "default"
+
+
+def _parse_name_server_running_line(line: str) -> Optional[Tuple[str, str]]:
+    """
+    Parse one running-config line for ip name-server.
+
+    Returns (no_command_line, normalized_ip) for global/default VRF lines only;
+    otherwise None.
+    """
+    s = line.strip()
+    if not s.startswith("ip name-server"):
+        return None
+    m = _NAME_SERVER_LINE_RE.match(s)
+    if not m:
+        return None
+    vrf, addr_token = m.group(1), m.group(2).strip()
+    if not _global_name_server_line_ok(vrf):
+        return None
+    try:
+        ipaddress.ip_address(addr_token)
+    except ValueError:
+        return None
+    return ("no " + s, str(ipaddress.ip_address(addr_token)))
+
+
+def _parse_domain_list_running_line(line: str) -> Optional[Tuple[str, str]]:
+    """Returns (no_command_line, domain) for ip domain-list lines."""
+    s = line.strip()
+    m = _DOMAIN_LIST_LINE_RE.match(s)
+    if not m:
+        return None
+    dom = m.group(1).strip()
+    if (len(dom) >= 2 and dom[0] == dom[-1] == '"') or (dom[:1] == "'" and dom[-1:] == "'"):
+        dom = dom[1:-1].strip()
+    if not _valid_ping_hostname_or_fqdn(dom):
+        return None
+    return ("no " + s, dom)
+
+
+def get_switch_dns_global(
+    ip: str, username: str
+) -> Tuple[Optional[Dict[str, List[str]]], Optional[str]]:
+    """
+    Read global (default VRF) DNS name servers and domain search list from running-config.
+
+    Returns ({"name_servers": [...], "domain_search": [...]}, None) on success.
+    """
+    try:
+        with get_connection(ip, username) as net_connect:
+            net_connect.enable()
+            ns_block = net_connect.send_command(
+                "show running-config | include ip name-server",
+                read_timeout=90,
+            )
+            dl_block = net_connect.send_command(
+                "show running-config | include ip domain-list",
+                read_timeout=90,
+            )
+        name_servers: List[str] = []
+        seen_ns: set = set()
+        for line in (ns_block or "").splitlines():
+            parsed = _parse_name_server_running_line(line)
+            if not parsed:
+                continue
+            _, norm = parsed
+            if norm not in seen_ns:
+                seen_ns.add(norm)
+                name_servers.append(norm)
+
+        domain_search: List[str] = []
+        seen_dom: set = set()
+        for line in (dl_block or "").splitlines():
+            parsed = _parse_domain_list_running_line(line)
+            if not parsed:
+                continue
+            _, dom = parsed
+            if dom not in seen_dom:
+                seen_dom.add(dom)
+                domain_search.append(dom)
+
+        return {"name_servers": name_servers, "domain_search": domain_search}, None
+    except Exception as e:
+        msg = format_connection_error(ip, username, e)
+        logger.warning("get_switch_dns_global failed for %s: %s", ip, msg)
+        return None, msg
+
+
+def _validate_dns_apply_lists(
+    name_servers: Any, domain_search: Any
+) -> Tuple[Optional[List[str]], Optional[List[str]], Optional[str]]:
+    """Normalize and validate JSON lists for apply_switch_dns_global."""
+    if name_servers is None:
+        ns_raw: List[str] = []
+    elif isinstance(name_servers, list):
+        ns_raw = [str(x).strip() for x in name_servers]
+    else:
+        return None, None, "name_servers must be a list of addresses."
+
+    if domain_search is None:
+        ds_raw: List[str] = []
+    elif isinstance(domain_search, list):
+        ds_raw = [str(x).strip() for x in domain_search]
+    else:
+        return None, None, "domain_search must be a list of domain strings."
+
+    out_ns: List[str] = []
+    seen_ns: set = set()
+    for s in ns_raw:
+        if not s:
+            continue
+        try:
+            norm = str(ipaddress.ip_address(s))
+        except ValueError:
+            return None, None, f"Invalid name server address: {s!r}."
+        if norm not in seen_ns:
+            seen_ns.add(norm)
+            out_ns.append(norm)
+
+    out_dom: List[str] = []
+    seen_dom: set = set()
+    for d in ds_raw:
+        if not d:
+            continue
+        if not _valid_ping_hostname_or_fqdn(d):
+            return None, None, f"Invalid domain search entry: {d!r}."
+        if d not in seen_dom:
+            seen_dom.add(d)
+            out_dom.append(d)
+
+    return out_ns, out_dom, None
+
+
+def apply_switch_dns_global(
+    ip: str, username: str, name_servers: Any, domain_search: Any
+) -> Tuple[str, Optional[str], Optional[str]]:
+    """
+    Replace global (default VRF) ip name-server and ip domain-list entries, then
+    write memory.
+
+    Returns (cli_transcript, error, new_config_hash). new_config_hash is set
+    only on full success.
+    """
+    out_ns, out_dom, verr = _validate_dns_apply_lists(name_servers, domain_search)
+    if verr:
+        return "", verr, None
+
+    log_parts: List[str] = []
+    try:
+        with get_connection(ip, username) as net_connect:
+            net_connect.enable()
+            cur_ns = net_connect.send_command(
+                "show running-config | include ip name-server",
+                read_timeout=90,
+            )
+            cur_dl = net_connect.send_command(
+                "show running-config | include ip domain-list",
+                read_timeout=90,
+            )
+
+            removals: List[str] = []
+            for line in (cur_ns or "").splitlines():
+                parsed = _parse_name_server_running_line(line)
+                if parsed:
+                    removals.append(parsed[0])
+            for line in (cur_dl or "").splitlines():
+                parsed = _parse_domain_list_running_line(line)
+                if parsed:
+                    removals.append(parsed[0])
+
+            uniq_removals: List[str] = []
+            for r in removals:
+                if r not in uniq_removals:
+                    uniq_removals.append(r)
+            removals = uniq_removals
+
+            additions: List[str] = []
+            for ns in out_ns:
+                additions.append(f"ip name-server vrf default {ns}")
+            for dom in out_dom:
+                additions.append(f"ip domain-list {dom}")
+
+            cfg_cmds = removals + additions + ["write memory"]
+            log_parts.append("! entering configuration mode\n")
+            cfg_out = net_connect.send_config_set(cfg_cmds, bypass_commands=_CONFIG_SET_BYPASS)
+            log_parts.append(cfg_out or "")
+            log_parts.append("\n! verify: name servers\n")
+            log_parts.append(
+                net_connect.send_command(
+                    "show running-config | include ip name-server",
+                    read_timeout=60,
+                )
+                or ""
+            )
+            log_parts.append("\n! verify: domain search\n")
+            log_parts.append(
+                net_connect.send_command(
+                    "show running-config | include ip domain-list",
+                    read_timeout=60,
+                )
+                or ""
+            )
+
+        h, herr = get_config_hash(ip, username)
+        if herr:
+            logger.warning("apply_switch_dns_global: hash after apply failed for %s: %s", ip, herr)
+        return "".join(log_parts).strip(), None, h
+    except Exception as e:
+        msg = format_connection_error(ip, username, e)
+        logger.warning("apply_switch_dns_global failed for %s: %s", ip, msg)
+        return "\n".join(log_parts).strip(), msg, None
+
+
 def get_switch_logging_last(
     ip: str, username: str, last_n: int = 50
 ) -> Tuple[Optional[str], Optional[str]]:
