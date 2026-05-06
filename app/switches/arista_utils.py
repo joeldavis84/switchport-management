@@ -4,6 +4,7 @@ import ipaddress
 import json
 import logging
 import re
+import shlex
 from typing import Any, Dict, List, Optional, Tuple
 
 import paramiko
@@ -318,6 +319,44 @@ def run_switch_ping(
     except Exception as e:
         msg = format_connection_error(ip, username, e)
         logger.warning("run_switch_ping failed for %s to %s: %s", ip, raw, msg)
+        return cmd, None, msg
+
+
+def run_switch_getent_hosts(
+    ip: str, username: str, target_raw: str
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Run `bash getent hosts <name>` on EOS for a validated target.
+
+    Accepts the same literal IP and hostname/FQDN rules as ping (strict tokens only;
+    the argument passed to bash is shell-quoted).
+
+    Returns (full_command, stdout_text, error).
+    """
+    raw = (target_raw or "").strip()
+    try:
+        addr = ipaddress.ip_address(raw)
+        token = addr.compressed
+    except ValueError:
+        if not _valid_ping_hostname_or_fqdn(raw):
+            return (
+                None,
+                None,
+                "Enter a valid IPv4/IPv6 address, short hostname, or FQDN "
+                "(ASCII letters, digits, hyphen; FQDN needs at least one period).",
+            )
+        token = raw
+    quoted = shlex.quote(token)
+    cmd = f"bash getent hosts {quoted}"
+    try:
+        with get_connection(ip, username) as net_connect:
+            net_connect.enable()
+            out = net_connect.send_command(cmd, read_timeout=90)
+        text = (out or "").strip() if out is not None else ""
+        return cmd, text, None
+    except Exception as e:
+        msg = format_connection_error(ip, username, e)
+        logger.warning("run_switch_getent_hosts failed for %s to %s: %s", ip, raw, msg)
         return cmd, None, msg
 
 

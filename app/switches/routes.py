@@ -13,6 +13,7 @@ from .arista_utils import (
     get_vlan_table,
     push_interface_admin_state,
     push_switch_config,
+    run_switch_getent_hosts,
     run_switch_ping,
 )
 
@@ -107,6 +108,30 @@ def manage_switch_dns(id):
     if err:
         return jsonify({"ok": False, "error": err, "output": transcript or ""})
     return jsonify({"ok": True, "output": transcript or "", "hash": new_hash})
+
+
+@switches_bp.route("/manage/<int:id>/dns/getent", methods=["POST"])
+def manage_switch_dns_getent(id):
+    switch = Switch.query.get_or_404(id)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": "Expected a JSON object body."}), 400
+    host = (body.get("hostname") or body.get("host") or "").strip()
+    if not host:
+        return jsonify({"ok": False, "error": "Hostname or FQDN is required."}), 400
+
+    cmd, out, err = run_switch_getent_hosts(switch.ip_address, switch.username, host)
+    if err:
+        payload = {
+            "ok": False,
+            "error": err,
+            "command": cmd,
+            "output": (out or ""),
+        }
+        if cmd is None:
+            return jsonify(payload), 400
+        return jsonify(payload)
+    return jsonify({"ok": True, "command": cmd, "output": out or ""})
 
 
 @switches_bp.route('/manage/<int:id>/notes', methods=['POST'])

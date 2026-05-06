@@ -188,8 +188,25 @@
             <button type="submit" class="btn btn-primary" id="dnsApplyBtn">Apply DNS settings</button>
         </form>
         <hr class="my-4">
-        <h3 class="h6">Switch CLI output</h3>
+        <h3 class="h6">Switch CLI output (apply)</h3>
         <pre id="dnsCliOutputPre" class="border rounded p-3 small mb-0 bg-body-secondary text-body" style="white-space: pre-wrap; max-height: 45vh; overflow: auto;">Open this tab to load current DNS from the switch. After you apply, configuration and verification output appears here.</pre>
+
+        <hr class="my-4">
+        <h3 class="h6">Test DNS resolution</h3>
+        <p class="text-muted small">Runs on the switch as <code>bash getent hosts …</code> (libc NSS/DNS). Uses only the name below—not the interface selector or the apply form fields.</p>
+        <form id="dnsGetentForm" class="mb-3">
+            <div class="row g-3 align-items-end flex-wrap">
+                <div class="col-auto flex-grow-1" style="min-width: 220px;">
+                    <label for="dnsGetentHostInput" class="form-label">Hostname or FQDN</label>
+                    <input type="text" class="form-control font-monospace" id="dnsGetentHostInput" autocomplete="off" spellcheck="false" placeholder="e.g. ntp.example.com or router1">
+                    <div class="invalid-feedback" id="dnsGetentHostFeedback">Enter a valid hostname, FQDN, or IP address.</div>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-outline-primary" id="dnsGetentSubmitBtn">Run getent hosts</button>
+                </div>
+            </div>
+        </form>
+        <pre id="dnsGetentOutputPre" class="border rounded p-3 small mb-0 bg-body-secondary text-body" style="white-space: pre-wrap; max-height: 35vh; overflow: auto;">Lookup output from the switch appears here.</pre>
     </div>
 </div>
 
@@ -211,6 +228,7 @@
     const switchNoteAddUrl = {{ url_for('switches.switch_note_add', id=switch.id)|tojson }};
     const switchNoteDeleteUrlTpl = {{ url_for('switches.switch_note_delete', id=switch.id, note_id=0)|tojson }};
     const dnsManageUrl = {{ url_for('switches.manage_switch_dns', id=switch.id)|tojson }};
+    const dnsGetentUrl = {{ url_for('switches.manage_switch_dns_getent', id=switch.id)|tojson }};
 
     function manageWorkOverlayEl() {
         return document.getElementById('manageWorkOverlay');
@@ -927,6 +945,65 @@
                     if (outPre) {
                         outPre.textContent = '';
                     }
+                    showManageFeedback('danger', 'Could not reach the server or the response was invalid.');
+                })
+                .finally(hideWorkModal);
+        });
+    }
+
+    function looksLikeDnsGetentTarget(s) {
+        return dnsLooksLikeIp(s) || dnsValidHostnameOrFqdn(s);
+    }
+
+    var dnsGetentHostEl = document.getElementById('dnsGetentHostInput');
+    if (dnsGetentHostEl) {
+        dnsGetentHostEl.addEventListener('input', function () {
+            dnsGetentHostEl.classList.remove('is-invalid');
+        });
+    }
+
+    var dnsGetentForm = document.getElementById('dnsGetentForm');
+    if (dnsGetentForm) {
+        dnsGetentForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var inp = document.getElementById('dnsGetentHostInput');
+            var outPreG = document.getElementById('dnsGetentOutputPre');
+            if (!inp || !outPreG) {
+                return;
+            }
+            inp.classList.remove('is-invalid');
+            var raw = (inp.value || '').trim();
+            if (!raw) {
+                inp.classList.add('is-invalid');
+                return;
+            }
+            if (!looksLikeDnsGetentTarget(raw)) {
+                inp.classList.add('is-invalid');
+                return;
+            }
+            showWorkModal('Running getent on the switch…');
+            fetch(dnsGetentUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json'
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ hostname: raw })
+            })
+                .then(parseJsonResponse)
+                .then(function (data) {
+                    var cmd = (data && data.command) ? data.command : '';
+                    var out = (data && data.output) ? data.output : '';
+                    outPreG.textContent = (cmd ? '$ ' + cmd + '\n\n' : '') + (out || '(no output)');
+                    if (data && data.ok) {
+                        showManageFeedback('success', 'Lookup finished.');
+                    } else {
+                        showManageFeedback('danger', (data && data.error) || 'Lookup failed.');
+                    }
+                })
+                .catch(function () {
+                    outPreG.textContent = '';
                     showManageFeedback('danger', 'Could not reach the server or the response was invalid.');
                 })
                 .finally(hideWorkModal);
