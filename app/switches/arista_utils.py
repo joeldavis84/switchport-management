@@ -242,14 +242,50 @@ def get_arp_table(ip, username):
         return [], msg
 
 
+def _dns_label_ok(label: str) -> bool:
+    """RFC 1035-style DNS label: 1–63 chars, letters/digits/hyphen, no leading/trailing hyphen."""
+    if not label or len(label) > 63:
+        return False
+    if label[0] == "-" or label[-1] == "-":
+        return False
+    return bool(re.match(r"^[A-Za-z0-9-]+$", label))
+
+
+def _valid_ping_hostname_or_fqdn(s: str) -> bool:
+    """
+    Short hostname (no '.') or FQDN (at least one '.', optional trailing '.').
+
+    Only ASCII letters, digits, hyphen, and period; no '..' or empty labels.
+    """
+    if not s or len(s) > 253:
+        return False
+    if not re.match(r"^[A-Za-z0-9.-]+$", s):
+        return False
+    if ".." in s:
+        return False
+    if "." not in s:
+        return _dns_label_ok(s)
+    body = s.rstrip(".")
+    if not body:
+        return False
+    if "." in body:
+        labels = body.split(".")
+        if any(not lbl for lbl in labels):
+            return False
+        return all(_dns_label_ok(lbl) for lbl in labels)
+    return s.endswith(".") and _dns_label_ok(body)
+
+
 def run_switch_ping(
     ip: str, username: str, target_raw: str
 ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
     Run a bounded ICMP ping from the switch (EOS) to a validated destination.
 
-    The target is parsed with the stdlib ipaddress module only; the CLI string is
-    built from the parsed object (never from unconstrained user text).
+    Accepts a literal IPv4/IPv6 address (no CIDR or zone suffix), a short hostname
+    (no period), or an FQDN (at least one period, optional trailing period). IP
+    literals use the parsed ipaddress form in the CLI; hostnames must pass strict
+    ASCII label checks so the token cannot carry shell/CLI metacharacters.
 
     Returns (eos_command, switch_output, error). On validation or connection
     failure, output is None and error is set; eos_command may still be set if
@@ -259,12 +295,19 @@ def run_switch_ping(
     try:
         addr = ipaddress.ip_address(raw)
     except ValueError:
-        return None, None, "Enter a valid IPv4 or IPv6 address (no CIDR or zone suffix)."
-
-    if addr.version == 4:
-        cmd = f"ping {addr.compressed} repeat 5"
+        if not _valid_ping_hostname_or_fqdn(raw):
+            return (
+                None,
+                None,
+                "Enter a valid IPv4/IPv6 address, short hostname, or FQDN "
+                "(ASCII letters, digits, hyphen; FQDN needs at least one period).",
+            )
+        cmd = f"ping {raw} repeat 5"
     else:
-        cmd = f"ping ipv6 {addr.compressed} repeat 5"
+        if addr.version == 4:
+            cmd = f"ping {addr.compressed} repeat 5"
+        else:
+            cmd = f"ping ipv6 {addr.compressed} repeat 5"
 
     try:
         with get_connection(ip, username) as net_connect:

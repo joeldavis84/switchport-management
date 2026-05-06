@@ -83,6 +83,50 @@
         return false;
     }
 
+    function dnsLabelOk(label) {
+        if (!label || label.length > 63) {
+            return false;
+        }
+        if (label[0] === '-' || label[label.length - 1] === '-') {
+            return false;
+        }
+        return /^[A-Za-z0-9-]+$/.test(label);
+    }
+
+    function validHostnameOrFqdn(s) {
+        s = String(s || '').trim();
+        if (!s || s.length > 253) {
+            return false;
+        }
+        if (!/^[A-Za-z0-9.-]+$/.test(s)) {
+            return false;
+        }
+        if (s.indexOf('..') !== -1) {
+            return false;
+        }
+        if (s.indexOf('.') === -1) {
+            return dnsLabelOk(s);
+        }
+        var body = s.replace(/\.+$/, '');
+        if (!body) {
+            return false;
+        }
+        if (body.indexOf('.') !== -1) {
+            var labels = body.split('.');
+            for (var i = 0; i < labels.length; i++) {
+                if (!labels[i] || !dnsLabelOk(labels[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return /\.+$/.test(s) && dnsLabelOk(body);
+    }
+
+    function looksLikePingTarget(s) {
+        return looksLikeIp(s) || validHostnameOrFqdn(s);
+    }
+
     function setRequestError(msg) {
         if (!msg) {
             reqErr.classList.add('d-none');
@@ -121,7 +165,7 @@
             setFieldInvalid(true);
             return;
         }
-        if (!looksLikeIp(raw)) {
+        if (!looksLikePingTarget(raw)) {
             setFieldInvalid(true);
             return;
         }
