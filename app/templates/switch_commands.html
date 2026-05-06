@@ -18,15 +18,15 @@
 </div>
 
 <p class="text-muted small mb-3">
-    Ping runs on the switch over SSH as EOS <code>ping</code> / <code>ping ipv6</code> (five probes). Only literal IPv4 or IPv6 addresses are accepted (no hostnames). Output is syntax-highlighted for readability.
+    Ping runs on the switch over SSH as EOS <code>ping</code> / <code>ping ipv6</code> (five probes). You may enter an IPv4/IPv6 literal, a short hostname (no <code>.</code>), or an FQDN with at least one period and an optional trailing dot. Hostnames are ASCII letters, digits, and hyphen only. Output is syntax-highlighted for readability.
 </p>
 
 <form id="switchPingForm" class="mb-3" novalidate>
     <div class="row g-3 align-items-end flex-wrap">
         <div class="col-auto flex-grow-1" style="min-width: 220px;">
-            <label for="pingTargetInput" class="form-label">Destination IP address</label>
-            <input type="text" class="form-control font-monospace" id="pingTargetInput" name="ip" autocomplete="off" placeholder="e.g. 192.0.2.1 or 2001:db8::1" required spellcheck="false">
-            <div class="invalid-feedback" id="pingTargetFeedback">Enter a valid IPv4 or IPv6 address.</div>
+            <label for="pingTargetInput" class="form-label">Destination (IP or hostname)</label>
+            <input type="text" class="form-control font-monospace" id="pingTargetInput" name="ip" autocomplete="off" placeholder="e.g. 192.0.2.1, 2001:db8::1, switch01, or example.com." required spellcheck="false">
+            <div class="invalid-feedback" id="pingTargetFeedback">Enter a valid IPv4/IPv6 address, short hostname, or FQDN.</div>
         </div>
         <div class="col-auto">
             <button type="submit" class="btn btn-primary" id="pingSubmitBtn">Run ping</button>
