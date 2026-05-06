@@ -268,6 +268,7 @@ def run_switch_ping(
 
     try:
         with get_connection(ip, username) as net_connect:
+            net_connect.enable()
             out = net_connect.send_command(cmd, read_timeout=120)
         text = (out or "").strip() if out is not None else ""
         return cmd, text, None
