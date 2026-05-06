@@ -30,6 +30,7 @@
             <a href="{{ url_for('switches.vlan_table', id=switch.id) }}" class="btn btn-secondary">All VLANs</a>
             <a href="{{ url_for('switches.arp_table', id=switch.id) }}" class="btn btn-outline-secondary">View ARP table</a>
             <a href="{{ url_for('switches.switch_logs', id=switch.id) }}" class="btn btn-outline-dark">View logs</a>
+            <a href="{{ url_for('switches.switch_commands', id=switch.id) }}" class="btn btn-outline-dark">Commands</a>
         </div>
     </div>
 </div>

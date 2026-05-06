@@ -1,5 +1,6 @@
 import errno
 import hashlib
+import ipaddress
 import json
 import logging
 import re
@@ -239,6 +240,41 @@ def get_arp_table(ip, username):
         msg = format_connection_error(ip, username, e)
         logger.warning("get_arp_table failed for %s: %s", ip, msg)
         return [], msg
+
+
+def run_switch_ping(
+    ip: str, username: str, target_raw: str
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Run a bounded ICMP ping from the switch (EOS) to a validated destination.
+
+    The target is parsed with the stdlib ipaddress module only; the CLI string is
+    built from the parsed object (never from unconstrained user text).
+
+    Returns (eos_command, switch_output, error). On validation or connection
+    failure, output is None and error is set; eos_command may still be set if
+    the command was known before failure.
+    """
+    raw = (target_raw or "").strip()
+    try:
+        addr = ipaddress.ip_address(raw)
+    except ValueError:
+        return None, None, "Enter a valid IPv4 or IPv6 address (no CIDR or zone suffix)."
+
+    if addr.version == 4:
+        cmd = f"ping {addr.compressed} repeat 5"
+    else:
+        cmd = f"ping ipv6 {addr.compressed} repeat 5"
+
+    try:
+        with get_connection(ip, username) as net_connect:
+            out = net_connect.send_command(cmd, read_timeout=120)
+        text = (out or "").strip() if out is not None else ""
+        return cmd, text, None
+    except Exception as e:
+        msg = format_connection_error(ip, username, e)
+        logger.warning("run_switch_ping failed for %s to %s: %s", ip, raw, msg)
+        return cmd, None, msg
 
 
 def get_switch_logging_last(

@@ -11,6 +11,7 @@
             <a href="#" class="btn btn-primary" aria-current="page">View VLANs</a>
             <a href="{{ url_for('switches.arp_table', id=switch.id) }}" class="btn btn-outline-secondary">View ARP table</a>
             <a href="{{ url_for('switches.switch_logs', id=switch.id) }}" class="btn btn-outline-dark">View logs</a>
+            <a href="{{ url_for('switches.switch_commands', id=switch.id) }}" class="btn btn-outline-dark">Commands</a>
         </div>
     </div>
 </div>

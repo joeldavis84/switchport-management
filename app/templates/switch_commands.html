@@ -1,0 +1,177 @@
+{% extends 'base.html' %}
+{% block content %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-3">
+    <h2 class="mb-0">Commands: {{ switch.description }} ({{ switch.ip_address }})</h2>
+    <div class="d-flex flex-column align-items-end gap-2">
+        <div class="d-inline-flex flex-wrap gap-2 justify-content-end" role="group" aria-label="Back navigation">
+            <a href="{{ url_for('switches.index') }}" class="btn btn-secondary rounded-pill">Back to Switches</a>
+            <a href="{{ url_for('switches.manage_switch', id=switch.id) }}" class="btn btn-outline-secondary rounded-pill">Back to Manage Switch</a>
+        </div>
+        <div class="btn-group" role="group" aria-label="Navigation">
+            <a href="{{ url_for('switches.vlan_table', id=switch.id) }}" class="btn btn-outline-secondary">View VLANs</a>
+            <a href="{{ url_for('switches.arp_table', id=switch.id) }}" class="btn btn-outline-secondary">View ARP table</a>
+            <a href="{{ url_for('switches.switch_logs', id=switch.id) }}" class="btn btn-outline-dark">View logs</a>
+            <a href="{{ url_for('switches.switch_commands', id=switch.id) }}" class="btn btn-primary" aria-current="page">Commands</a>
+        </div>
+    </div>
+</div>
+
+<p class="text-muted small mb-3">
+    Ping runs on the switch over SSH as EOS <code>ping</code> / <code>ping ipv6</code> (five probes). Only literal IPv4 or IPv6 addresses are accepted (no hostnames). Output is syntax-highlighted for readability.
+</p>
+
+<form id="switchPingForm" class="mb-3" novalidate>
+    <div class="row g-3 align-items-end flex-wrap">
+        <div class="col-auto flex-grow-1" style="min-width: 220px;">
+            <label for="pingTargetInput" class="form-label">Destination IP address</label>
+            <input type="text" class="form-control font-monospace" id="pingTargetInput" name="ip" autocomplete="off" placeholder="e.g. 192.0.2.1 or 2001:db8::1" required spellcheck="false">
+            <div class="invalid-feedback" id="pingTargetFeedback">Enter a valid IPv4 or IPv6 address.</div>
+        </div>
+        <div class="col-auto">
+            <button type="submit" class="btn btn-primary" id="pingSubmitBtn">Run ping</button>
+        </div>
+    </div>
+</form>
+
+<div id="pingRequestError" class="alert alert-danger d-none" role="alert"></div>
+
+<p id="pingOutputPlaceholder" class="text-muted small mb-2">Switch CLI output will appear below after a successful request.</p>
+<div id="pingOutputWrap" class="d-none">
+    <pre class="mb-0 rounded border overflow-hidden" style="max-height: 65vh; overflow: auto;"><code id="pingOutputCode" class="language-bash hljs"></code></pre>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script>
+(function () {
+    var pingUrl = {{ url_for('switches.switch_ping', id=switch.id)|tojson }};
+    var form = document.getElementById('switchPingForm');
+    var input = document.getElementById('pingTargetInput');
+    var feedback = document.getElementById('pingTargetFeedback');
+    var submitBtn = document.getElementById('pingSubmitBtn');
+    var reqErr = document.getElementById('pingRequestError');
+    var placeholder = document.getElementById('pingOutputPlaceholder');
+    var wrap = document.getElementById('pingOutputWrap');
+    var codeEl = document.getElementById('pingOutputCode');
+    if (!form || !input || !submitBtn || !codeEl) {
+        return;
+    }
+
+    function looksLikeIp(s) {
+        s = String(s || '').trim();
+        if (!s || s.length > 128) {
+            return false;
+        }
+        if (s.indexOf('%') !== -1 || s.indexOf('/') !== -1) {
+            return false;
+        }
+        var v4 = /^(\d{1,3}\.){3}\d{1,3}$/;
+        if (v4.test(s)) {
+            return s.split('.').every(function (part) {
+                if (!/^\d{1,3}$/.test(part)) {
+                    return false;
+                }
+                var n = parseInt(part, 10);
+                return n >= 0 && n <= 255;
+            });
+        }
+        if (s.indexOf(':') !== -1 && /^[0-9a-fA-F:]+$/.test(s)) {
+            return true;
+        }
+        return false;
+    }
+
+    function setRequestError(msg) {
+        if (!msg) {
+            reqErr.classList.add('d-none');
+            reqErr.textContent = '';
+            return;
+        }
+        reqErr.textContent = msg;
+        reqErr.classList.remove('d-none');
+    }
+
+    function setFieldInvalid(invalid) {
+        if (invalid) {
+            input.classList.add('is-invalid');
+        } else {
+            input.classList.remove('is-invalid');
+        }
+    }
+
+    function showOutputBlock(command, output) {
+        var body = '$ ' + command + '\n\n' + (output || '');
+        codeEl.textContent = body;
+        if (window.hljs && typeof hljs.highlightElement === 'function') {
+            codeEl.className = 'language-bash hljs';
+            hljs.highlightElement(codeEl);
+        }
+        placeholder.classList.add('d-none');
+        wrap.classList.remove('d-none');
+    }
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        setRequestError('');
+        setFieldInvalid(false);
+        var raw = input.value.trim();
+        if (!raw) {
+            setFieldInvalid(true);
+            return;
+        }
+        if (!looksLikeIp(raw)) {
+            setFieldInvalid(true);
+            return;
+        }
+        submitBtn.disabled = true;
+        fetch(pingUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json'
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ ip: raw })
+        })
+            .then(function (r) {
+                var ct = (r.headers.get('content-type') || '').toLowerCase();
+                if (ct.indexOf('application/json') === -1) {
+                    return Promise.reject(new Error('Server did not return JSON.'));
+                }
+                return r.json().then(function (data) {
+                    return { ok: r.ok, data: data };
+                });
+            })
+            .then(function (result) {
+                var data = result.data;
+                if (!data || typeof data !== 'object') {
+                    setRequestError('Unexpected response from the server.');
+                    return;
+                }
+                if (data.ok && data.command) {
+                    showOutputBlock(data.command, data.output);
+                    setRequestError('');
+                    return;
+                }
+                var err = data.error || 'Request failed.';
+                setRequestError(err);
+                if (data.command) {
+                    showOutputBlock(data.command, data.output || '');
+                }
+            })
+            .catch(function () {
+                setRequestError('Could not reach the server or the response was invalid.');
+            })
+            .finally(function () {
+                submitBtn.disabled = false;
+            });
+    });
+
+    input.addEventListener('input', function () {
+        setFieldInvalid(false);
+    });
+})();
+</script>
+{% endblock %}

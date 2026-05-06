@@ -11,6 +11,7 @@ from .arista_utils import (
     get_vlan_table,
     push_interface_admin_state,
     push_switch_config,
+    run_switch_ping,
 )
 
 @switches_bp.route('/')
@@ -258,6 +259,36 @@ def arp_table(id):
 
 
 LOG_TAIL_LINES = 50
+
+
+@switches_bp.route('/manage/<int:id>/commands', methods=['GET'])
+def switch_commands(id):
+    switch = Switch.query.get_or_404(id)
+    return render_template('switch_commands.html', switch=switch)
+
+
+@switches_bp.route('/manage/<int:id>/commands/ping', methods=['POST'])
+def switch_ping(id):
+    switch = Switch.query.get_or_404(id)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": "Expected a JSON object body."}), 400
+    target = (body.get("ip") or body.get("target") or "").strip()
+    if not target:
+        return jsonify({"ok": False, "error": "IP address is required."}), 400
+
+    cmd, out, err = run_switch_ping(switch.ip_address, switch.username, target)
+    if err:
+        payload = {
+            "ok": False,
+            "error": err,
+            "command": cmd,
+            "output": (out or ""),
+        }
+        if cmd is None:
+            return jsonify(payload), 400
+        return jsonify(payload)
+    return jsonify({"ok": True, "command": cmd, "output": out or ""})
 
 
 @switches_bp.route('/manage/<int:id>/logs', methods=['GET'])
