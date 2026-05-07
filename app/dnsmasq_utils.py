@@ -142,6 +142,42 @@ def _collect_leaf_values_ordered(aug: Any, node: str, out: List[str]) -> None:
         _collect_leaf_values_ordered(aug, c, out)
 
 
+def _format_address_from_augeas(
+    aug: Any, directive_node: str, children: List[str]
+) -> str:
+    """
+    Rebuild dnsmasq `address=` from the Augeas Dnsmasq lens tree.
+
+    The lens stores the reply target on the `address` node and path/wildcard
+    segments as `domain[n]` children (see augeas tests: address=/a/b/1.2.3.3).
+    A naive flatten of all leaves drops the parent value and breaks slash paths.
+    """
+    ch = sorted(children or [], key=_numeric_index_suffix)
+    domain_segs: List[str] = []
+    for c in ch:
+        if _node_label(c.rsplit("/", 1)[-1]) != "domain":
+            continue
+        try:
+            dv = aug.get(c)
+        except Exception:
+            dv = None
+        if dv is not None and str(dv).strip() != "":
+            domain_segs.append(str(dv).strip())
+    try:
+        ip = aug.get(directive_node)
+    except Exception:
+        ip = None
+    ip_s = str(ip).strip() if ip is not None else ""
+    if domain_segs:
+        path = "/".join(domain_segs)
+        if ip_s:
+            return f"address=/{path}/{ip_s}"
+        return f"address=/{path}"
+    if ip_s:
+        return _fmt_directive("address", ip_s)
+    return "address"
+
+
 def _format_directive_subtree(aug: Any, directive_node: str) -> str:
     """
     Pretty one directive line from a top-level Dnsmasq lens subtree
@@ -149,6 +185,8 @@ def _format_directive_subtree(aug: Any, directive_node: str) -> str:
     """
     label = _node_label(directive_node.rsplit("/", 1)[-1])
     children = aug.match(directive_node.rstrip("/") + "/*")
+    if label == "address" and children:
+        return _format_address_from_augeas(aug, directive_node, list(children))
     if not children:
         try:
             v = aug.get(directive_node)
@@ -167,8 +205,6 @@ def _format_directive_subtree(aug: Any, directive_node: str) -> str:
         if v is None or v == "":
             return label
         return _fmt_directive(label, v)
-    if label == "address" and len(parts) >= 2:
-        return f"address=/{'/'.join(parts)}"
     if label == "server" and parts:
         rhs = " ".join(parts).strip()
         return _fmt_directive(label, rhs) if rhs else label
