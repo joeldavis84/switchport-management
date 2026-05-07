@@ -169,10 +169,10 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
             var subnet = parts.length >= 2 ? parts[1] : '';
             var third = parts.length >= 3 ? parts[2] : '';
             var out = '<div class="mt-2 small">';
-            out += '<div class="mb-1"><span class="text-muted">Domain name</span>: ';
+            out += '<div class="mb-1"><span class="text-muted"><b>Domain name</b></span>: ';
             out += '<span class="font-monospace text-break">' + escapeHtml(name) + '</span></div>';
             if (subnet) {
-                out += '<div class="mb-1"><span class="text-muted">Subnet</span>: ';
+	    out += '<div class="mb-1"><span class="text-muted"><b>Subnet</b></span>: ';
                 out += '<span class="font-monospace text-break">' + escapeHtml(subnet) + '</span></div>';
             }
             if (third) {
