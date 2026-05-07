@@ -1,4 +1,6 @@
 import os
+import re
+import shlex
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -48,17 +50,32 @@ def _write_text(path: str, text: str) -> None:
         f.write(text if text is not None else "")
 
 
+def _node_label(seg: str) -> str:
+    """Last path segment basename, stripping Augeas [n] index."""
+    leaf = seg.rsplit("/", 1)[-1] if "/" in seg else seg
+    if "[" in leaf:
+        return leaf.split("[", 1)[0]
+    return leaf
+
+
+def _rel_from_augeas_path(path: str) -> Optional[str]:
+    """`/files/etc/dnsmasq.d/foo.conf` -> `etc/dnsmasq.d/foo.conf`."""
+    p = path.strip()
+    if not p.startswith("/files/etc/"):
+        return None
+    return p[len("/files/") :].lstrip("/")
+
+
 _DNS_GLOBAL_KEYS = {
     "domain-needed",
     "bogus-priv",
+    "bogus-nxdomain",
     "no-resolv",
     "resolv-file",
-    "server",
     "no-hosts",
     "addn-hosts",
     "hostsdir",
     "domain",
-    "local",
     "expand-hosts",
     "local-ttl",
     "neg-ttl",
@@ -73,11 +90,15 @@ _DNS_GLOBAL_KEYS = {
     "bind-dynamic",
     "strict-order",
     "edns-packet-max",
+    "auth-zone",
+    "trust-anchor",
 }
 
+_DNS_COMMENT_LABELS = frozenset({"#comment", ";comment", "comment", "Comment"})
+
+_DNS_AMBIGUOUS_KEYS = frozenset({"server", "local"})
+
 _DNS_ZONE_KEYS = {
-    "server",
-    "local",
     "address",
     "cname",
     "ptr-record",
@@ -88,6 +109,8 @@ _DNS_ZONE_KEYS = {
     "naptr-record",
 }
 
+_DNS_MANAGED_KEYS = _DNS_GLOBAL_KEYS | _DNS_ZONE_KEYS | _DNS_AMBIGUOUS_KEYS
+
 
 def _fmt_directive(key: str, value: Optional[str]) -> str:
     if value is None or value == "":
@@ -96,6 +119,71 @@ def _fmt_directive(key: str, value: Optional[str]) -> str:
     if value.startswith("="):
         return f"{key}{value}"
     return f"{key}={value}"
+
+
+def _numeric_index_suffix(path: str) -> Tuple[int, str]:
+    m = re.search(r"\[(\d+)\]$", path.rstrip("/"))
+    return (int(m.group(1)), path) if m else (-1, path)
+
+
+def _collect_leaf_values_ordered(aug: Any, node: str, out: List[str]) -> None:
+    """Depth-first: append non-None aug.get values for leaf nodes under node."""
+    children = aug.match(node.rstrip("/") + "/*")
+    children = sorted(children, key=_numeric_index_suffix)
+    if not children:
+        try:
+            v = aug.get(node)
+        except Exception:
+            v = None
+        if v is not None and v != "":
+            out.append(v)
+        return
+    for c in children:
+        _collect_leaf_values_ordered(aug, c, out)
+
+
+def _format_directive_subtree(aug: Any, directive_node: str) -> str:
+    """
+    Pretty one directive line from a top-level Dnsmasq lens subtree
+    (e.g. `/files/etc/dnsmasq.conf/server[3]` ...).
+    """
+    label = _node_label(directive_node.rsplit("/", 1)[-1])
+    children = aug.match(directive_node.rstrip("/") + "/*")
+    if not children:
+        try:
+            v = aug.get(directive_node)
+        except Exception:
+            v = None
+        if v is None or v == "":
+            return label
+        return _fmt_directive(label, v)
+    parts: List[str] = []
+    _collect_leaf_values_ordered(aug, directive_node, parts)
+    if not parts:
+        try:
+            v = aug.get(directive_node)
+        except Exception:
+            v = None
+        if v is None or v == "":
+            return label
+        return _fmt_directive(label, v)
+    if label == "address" and len(parts) >= 2:
+        return f"address=/{'/'.join(parts)}"
+    if label == "server" and parts:
+        rhs = " ".join(parts).strip()
+        return _fmt_directive(label, rhs) if rhs else label
+
+    # Default: flattened RHS (often still readable for globals with simple values).
+    joined = " ".join(parts).strip()
+    return _fmt_directive(label, joined) if joined else label
+
+
+def _directive_has_domain_subtree(aug: Any, node: str) -> bool:
+    """True when this top-level directive has immediate `domain[...]` children (zone-scoped)."""
+    for c in aug.match(node.rstrip("/") + "/*") or []:
+        if _node_label(c.rsplit("/", 1)[-1]) == "domain":
+            return True
+    return False
 
 
 def _try_get_augeas() -> Tuple[Optional[Any], Optional[str]]:
@@ -117,14 +205,24 @@ def _dnsmasq_file_tree_paths(snapshot: DnsmasqSnapshot) -> List[str]:
         if not rel.startswith("etc/"):
             continue
         out.append("/files/" + rel)
+    out.sort(key=lambda x: (
+        (0 if "dnsmasq.conf" in x and "dnsmasq.d" not in x else 1),
+        x,
+    ))
     return out
 
 
-def parse_dnsmasq_dns_only(snapshot: DnsmasqSnapshot) -> Tuple[Optional[Dict[str, List[str]]], Optional[str]]:
+def parse_dnsmasq_dns_only(snapshot: DnsmasqSnapshot) -> Tuple[
+    Optional[Dict[str, Any]], Optional[str]
+]:
     """
-    Parse the snapshotted dnsmasq config using Augeas and return DNS-only information:
-    - globals: selected global DNS directives
-    - zones: zone/override directives (server/local/address/etc.)
+    Parse the snapshotted dnsmasq config using Augeas: walk each file's Dnsmasq tree
+    and emit structured DNS-only items.
+
+    Returns:
+      globals: list of {"directive", "display", "source", "augeas_path"}
+      zones: same shape
+      parse_errors: optional list of {path, message} from Augeas
     """
     Augeas, err = _try_get_augeas()
     if err:
@@ -132,45 +230,81 @@ def parse_dnsmasq_dns_only(snapshot: DnsmasqSnapshot) -> Tuple[Optional[Dict[str
 
     try:
         aug = Augeas(root=snapshot.snapshot_dir)
-        # Explicit transforms: dnsmasq.conf and all files inside dnsmasq.d
+        # Register lens for every snapshotted file (wildcard transform is unreliable
+        # for load on some hosts).
         aug.transform("Dnsmasq", "/etc/dnsmasq.conf")
-        aug.transform("Dnsmasq", "/etc/dnsmasq.d/*")
+        for base in _dnsmasq_file_tree_paths(snapshot):
+            rel = base[len("/files/") :].lstrip("/") if base.startswith("/files/") else ""
+            if rel and rel.startswith("etc/dnsmasq.d/"):
+                aug.transform("Dnsmasq", "/" + rel)
         aug.load()
     except Exception as e:
         return None, f"Failed to parse dnsmasq config with Augeas: {type(e).__name__}: {e}"
 
-    globals_out: List[str] = []
-    zones_out: List[str] = []
+    parse_errors: List[Dict[str, str]] = []
+    errs_fn = getattr(aug, "errors", None)
+    if callable(errs_fn):
+        try:
+            for rec in errs_fn():
+                if isinstance(rec, tuple) or isinstance(rec, list):
+                    tup = tuple(rec)
+                    path = str(tup[0]) if len(tup) > 0 else ""
+                    msg = str(tup[2]) if len(tup) > 2 else str(tup[-1])
+                    parse_errors.append({"path": path, "message": msg})
+                else:
+                    parse_errors.append({"path": "", "message": str(rec)})
+        except Exception:
+            parse_errors.append(
+                {"path": "", "message": "Augeas reported errors but they could not be read."}
+            )
+
+    globals_items: List[Dict[str, str]] = []
+    zones_items: List[Dict[str, str]] = []
 
     for base in _dnsmasq_file_tree_paths(snapshot):
+        source = _rel_from_augeas_path(base) or base
         try:
-            nodes = aug.match(base + "/*") or []
+            top_nodes = sorted(aug.match(base.rstrip("/") + "/*") or [], key=lambda p: p)
         except Exception:
-            nodes = []
-        for node in nodes:
-            key = str(node).rsplit("/", 1)[-1]
-            # Normalize array-style keys like server[1] -> server
-            if "[" in key:
-                key0 = key.split("[", 1)[0]
-            else:
-                key0 = key
-            try:
-                val = aug.get(node)
-            except Exception:
-                val = None
+            top_nodes = []
 
-            if key0 in _DNS_ZONE_KEYS:
-                zones_out.append(_fmt_directive(key0, val))
+        for node in top_nodes:
+            label = _node_label(node.rsplit("/", 1)[-1])
+            if label in _DNS_COMMENT_LABELS or label == "empty":
                 continue
-            if key0 in _DNS_GLOBAL_KEYS:
-                globals_out.append(_fmt_directive(key0, val))
+            if label not in _DNS_MANAGED_KEYS:
+                continue
+            display = _format_directive_subtree(aug, node).strip()
+            if not display:
                 continue
 
-    # Stable output
-    globals_out = sorted(dict.fromkeys(globals_out))
-    zones_out = sorted(dict.fromkeys(zones_out))
+            item = {
+                "directive": label,
+                "display": display,
+                "source": source,
+                "augeas_path": node,
+            }
+            if label in _DNS_AMBIGUOUS_KEYS:
+                if _directive_has_domain_subtree(aug, node):
+                    zones_items.append(item)
+                else:
+                    globals_items.append(item)
+            elif label in _DNS_ZONE_KEYS:
+                zones_items.append(item)
+            elif label in _DNS_GLOBAL_KEYS:
+                globals_items.append(item)
 
-    return {"globals": globals_out, "zones": zones_out}, None
+    def _sort_key(it: Dict[str, str]) -> Tuple[str, str, str]:
+        return (it.get("source") or "", it.get("directive") or "", it.get("display") or "")
+
+    globals_items.sort(key=_sort_key)
+    zones_items.sort(key=_sort_key)
+
+    return {
+        "globals": globals_items,
+        "zones": zones_items,
+        "parse_errors": parse_errors,
+    }, None
 
 
 def snapshot_dnsmasq_configs() -> Tuple[Optional[DnsmasqSnapshot], Optional[str]]:
@@ -193,25 +327,34 @@ def snapshot_dnsmasq_configs() -> Tuple[Optional[DnsmasqSnapshot], Optional[str]
                 rel_files.append(rel_main)
 
             # Directory config fragments
-            listing = conn.send_command("ls -1 /etc/dnsmasq.d 2>/dev/null || true", read_timeout=60)
-            names = []
-            for line in (listing or "").splitlines():
-                n = line.strip()
-                if not n:
+            find_out = conn.send_command(
+                "find /etc/dnsmasq.d -maxdepth 1 -type f 2>/dev/null | LC_ALL=C sort",
+                read_timeout=120,
+            )
+            paths_found: List[str] = []
+            for line in (find_out or "").splitlines():
+                p = line.strip()
+                if not p.startswith("/etc/dnsmasq.d/"):
                     continue
-                if "/" in n or "\x00" in n:
+                if "\x00" in p or ".." in p:
                     continue
-                names.append(n)
-            names.sort()
+                paths_found.append(p)
+            paths_found.sort()
 
-            for n in names:
-                # Best effort: only regular files.
-                cmd = f"test -f /etc/dnsmasq.d/{n} && cat /etc/dnsmasq.d/{n} || true"
-                body = conn.send_command(cmd, read_timeout=60) or ""
-                rel = _safe_relpath(f"etc/dnsmasq.d/{n}")
+            for fp in paths_found:
+                basename = fp.rsplit("/", 1)[-1]
+                if not basename:
+                    continue
+                body = conn.send_command(
+                    f"cat {shlex.quote(fp)} 2>/dev/null || true", read_timeout=120
+                ) or ""
+                rel = _safe_relpath(f"etc/dnsmasq.d/{basename}")
                 if rel:
                     _write_text(os.path.join(snap_dir, rel), body)
                     rel_files.append(rel)
+        rel_files.sort(
+            key=lambda r: (0 if r == "etc/dnsmasq.conf" else 1, r),
+        )
         return DnsmasqSnapshot(snapshot_dir=snap_dir, files=rel_files), None
     except Exception as e:
         return None, f"Failed to fetch dnsmasq config via SSH: {type(e).__name__}: {e}"

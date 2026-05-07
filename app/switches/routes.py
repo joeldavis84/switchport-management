@@ -38,6 +38,7 @@ def dns_refresh():
             "snapshot_dir": snap.snapshot_dir,
             "globals": parsed.get("globals", []),
             "zones": parsed.get("zones", []),
+            "parse_errors": parsed.get("parse_errors", []),
         }
     )
 

@@ -9,7 +9,7 @@
 
 <p class="text-muted small mb-3">
     Read-only view of dnsmasq configuration fetched over SSH from <code>192.168.27.12</code>.
-    Each page load triggers an async refresh that snapshots <code>/etc/dnsmasq.conf</code> and <code>/etc/dnsmasq.d/*</code> into this container and re-parses them.
+    Each page load triggers an async refresh that snapshots <code>/etc/dnsmasq.conf</code> and every regular file in <code>/etc/dnsmasq.d/</code> into this container, then loads it with the <strong>Augeas Dnsmasq lens</strong> and walks the resulting tree so each DNS-related directive is shown as its own row.
 </p>
 
 <p class="text-muted small mb-3">
@@ -17,6 +17,7 @@
 </p>
 
 <div id="dnsmasqError" class="alert alert-danger d-none" role="alert"></div>
+<div id="dnsmasqParseWarnings" class="alert alert-warning d-none" role="status"></div>
 
 <div id="dnsmasqContent">
     <p class="text-muted small mb-2">Configuration items will render here after refresh completes.</p>
@@ -47,6 +48,7 @@
     var modalEl = document.getElementById('dnsmasqRefreshModal');
     var errEl = document.getElementById('dnsmasqError');
     var acc = document.getElementById('dnsmasqAccordion');
+    var warnEl = document.getElementById('dnsmasqParseWarnings');
     if (!modalEl || !acc || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
         return;
     }
@@ -71,34 +73,71 @@
             .replace(/\"/g, '&quot;');
     }
 
-    function renderAccordion(globals, zones) {
-        acc.innerHTML = '';
-        var g = Array.isArray(globals) ? globals : [];
-        var z = Array.isArray(zones) ? zones : [];
-
-        function addItem(idx, title, lines) {
-            var headId = 'dnsmasqHead' + idx;
-            var collapseId = 'dnsmasqCollapse' + idx;
-            var pre = escapeHtml((lines || []).join('\\n'));
-            var bodyHtml = pre ? ('<pre class="mb-0 small" style="white-space: pre-wrap;">' + pre + '</pre>') :
-                '<div class="text-muted small">No DNS directives found.</div>';
-            var open = idx === 0 ? ' show' : '';
-            acc.insertAdjacentHTML('beforeend',
-                '<div class="accordion-item">' +
-                '  <h2 class="accordion-header" id="' + headId + '">' +
-                '    <button class="accordion-button' + (idx === 0 ? '' : ' collapsed') + '" type="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" aria-expanded="' + (idx === 0 ? 'true' : 'false') + '" aria-controls="' + collapseId + '">' +
-                escapeHtml(title) +
-                '    </button>' +
-                '  </h2>' +
-                '  <div id="' + collapseId + '" class="accordion-collapse collapse' + open + '" aria-labelledby="' + headId + '" data-bs-parent="#dnsmasqAccordion">' +
-                '    <div class="accordion-body">' + bodyHtml + '</div>' +
-                '  </div>' +
-                '</div>'
-            );
+    function setParseWarnings(list) {
+        if (!warnEl) {
+            return;
         }
+        var arr = Array.isArray(list) ? list : [];
+        if (arr.length === 0) {
+            warnEl.classList.add('d-none');
+            warnEl.innerHTML = '';
+            return;
+        }
+        warnEl.innerHTML =
+            '<strong>Parsing notes.</strong> Augeas reported ' + arr.length +
+            ' load issue(s). Some files may be incomplete.';
+        warnEl.classList.remove('d-none');
+    }
 
-        addItem(0, 'dnsmasq globals', g);
-        addItem(1, 'Zone information', z);
+    function renderDirectiveList(items) {
+        items = Array.isArray(items) ? items : [];
+        if (items.length === 0) {
+            return '<p class="text-muted small mb-0">No matching DNS directives in the parsed tree.</p>';
+        }
+        var html = '<ul class="list-group list-group-flush">';
+        items.forEach(function (it) {
+            var directive = escapeHtml(it.directive || '');
+            var display = escapeHtml(it.display || '');
+            var source = escapeHtml(it.source || '');
+            var ap = escapeHtml(it.augeas_path || '');
+            html += '<li class="list-group-item px-3 py-3">';
+            html += '<div class="d-flex flex-wrap gap-2 align-items-baseline">';
+            html += '<code class="fw-semibold">' + directive + '</code>';
+            html += '<span class="badge text-bg-secondary">' + source + '</span>';
+            html += '</div>';
+            html += '<div class="font-monospace small text-break mt-2">' + display + '</div>';
+            if (ap) {
+                html += '<div class="text-muted mt-2 small"><span class="font-monospace text-break">' + ap + '</span></div>';
+            }
+            html += '</li>';
+        });
+        html += '</ul>';
+        return html;
+    }
+
+    function addAccordionPane(idx, title, bodyHtml, startOpen) {
+        var headId = 'dnsmasqHead' + idx;
+        var collapseId = 'dnsmasqCollapse' + idx;
+        var open = startOpen ? ' show' : '';
+        acc.insertAdjacentHTML('beforeend',
+            '<div class="accordion-item">' +
+            '  <h2 class="accordion-header" id="' + headId + '">' +
+            '    <button class="accordion-button' + (startOpen ? '' : ' collapsed') + '" type="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" aria-expanded="' + (startOpen ? 'true' : 'false') + '" aria-controls="' + collapseId + '">' +
+            escapeHtml(title) +
+            '    </button>' +
+            '  </h2>' +
+            '  <div id="' + collapseId + '" class="accordion-collapse collapse' + open + '" aria-labelledby="' + headId + '" data-bs-parent="#dnsmasqAccordion">' +
+            '    <div class="accordion-body p-0">' + bodyHtml + '</div>' +
+            '  </div>' +
+            '</div>'
+        );
+    }
+
+    function renderAccordion(globals, zones, parseErrors) {
+        acc.innerHTML = '';
+        setParseWarnings(parseErrors);
+        addAccordionPane(0, 'dnsmasq globals', renderDirectiveList(globals), true);
+        addAccordionPane(1, 'Zone information', renderDirectiveList(zones), false);
     }
 
     modal.show();
@@ -120,7 +159,7 @@
                 return;
             }
             setError('');
-            renderAccordion(data.globals || [], data.zones || []);
+            renderAccordion(data.globals || [], data.zones || [], data.parse_errors || []);
         })
         .catch(function () {
             setError('Could not reach the server or the response was invalid.');
