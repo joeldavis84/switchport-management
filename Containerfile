@@ -10,7 +10,7 @@ WORKDIR /app
 
 # Install Python 3, pip, SSH client tools, and nginx (reverse proxy on port 80)
 # UBI Minimal uses 'microdnf' instead of 'dnf'
-RUN microdnf install -y python3 python3-pip openssh-clients nginx \
+RUN microdnf install -y python3 python3-pip openssh-clients nginx augeas augeas-libs python3-augeas \
     && microdnf clean all \
     && rm -f /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.rpmsave 2>/dev/null || true
 

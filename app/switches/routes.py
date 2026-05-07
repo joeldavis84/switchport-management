@@ -1,7 +1,7 @@
 from flask import abort, flash, jsonify, redirect, render_template, request, url_for
 from app import db
 from app.models import Switch, SwitchNote, VlanNote
-from app.dnsmasq_utils import load_and_parse_snapshot, snapshot_dnsmasq_configs
+from app.dnsmasq_utils import parse_dnsmasq_dns_only, snapshot_dnsmasq_configs
 from . import switches_bp
 from .arista_utils import (
     apply_switch_dns_global,
@@ -29,12 +29,15 @@ def dns_refresh():
     snap, err = snapshot_dnsmasq_configs()
     if err or snap is None:
         return jsonify({"ok": False, "error": err or "Snapshot failed."})
-    parsed = load_and_parse_snapshot(snap)
+    parsed, perr = parse_dnsmasq_dns_only(snap)
+    if perr or parsed is None:
+        return jsonify({"ok": False, "error": perr or "Parse failed."})
     return jsonify(
         {
             "ok": True,
             "snapshot_dir": snap.snapshot_dir,
-            "files": parsed,
+            "globals": parsed.get("globals", []),
+            "zones": parsed.get("zones", []),
         }
     )
 

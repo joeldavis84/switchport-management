@@ -1,8 +1,7 @@
 import os
-import re
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from netmiko import ConnectHandler
 
@@ -49,19 +48,129 @@ def _write_text(path: str, text: str) -> None:
         f.write(text if text is not None else "")
 
 
-def _parse_dnsmasq_lines(text: str) -> List[str]:
+_DNS_GLOBAL_KEYS = {
+    "domain-needed",
+    "bogus-priv",
+    "no-resolv",
+    "resolv-file",
+    "server",
+    "no-hosts",
+    "addn-hosts",
+    "hostsdir",
+    "domain",
+    "local",
+    "expand-hosts",
+    "local-ttl",
+    "neg-ttl",
+    "cache-size",
+    "min-cache-ttl",
+    "max-cache-ttl",
+    "dns-forward-max",
+    "listen-address",
+    "interface",
+    "except-interface",
+    "bind-interfaces",
+    "bind-dynamic",
+    "strict-order",
+    "edns-packet-max",
+}
+
+_DNS_ZONE_KEYS = {
+    "server",
+    "local",
+    "address",
+    "cname",
+    "ptr-record",
+    "txt-record",
+    "mx-host",
+    "srv-host",
+    "host-record",
+    "naptr-record",
+}
+
+
+def _fmt_directive(key: str, value: Optional[str]) -> str:
+    if value is None or value == "":
+        return key
+    # Augeas typically provides the RHS; dnsmasq uses key=value style.
+    if value.startswith("="):
+        return f"{key}{value}"
+    return f"{key}={value}"
+
+
+def _try_get_augeas() -> Tuple[Optional[Any], Optional[str]]:
+    try:
+        from augeas import Augeas  # type: ignore
+    except Exception as e:
+        return None, f"Augeas python bindings are not available: {type(e).__name__}: {e}"
+    return Augeas, None
+
+
+def _dnsmasq_file_tree_paths(snapshot: DnsmasqSnapshot) -> List[str]:
     """
-    Minimal, read-only parser: returns non-empty, non-comment config lines.
+    Convert snapshot-relative file paths like etc/dnsmasq.conf into augeas /files paths.
     """
     out: List[str] = []
-    for raw in (text or "").splitlines():
-        s = raw.strip()
-        if not s:
+    for rel in snapshot.files:
+        # Snapshot uses rel paths without leading slash.
+        rel = rel.strip().lstrip("/")
+        if not rel.startswith("etc/"):
             continue
-        if s.startswith("#") or s.startswith(";"):
-            continue
-        out.append(s)
+        out.append("/files/" + rel)
     return out
+
+
+def parse_dnsmasq_dns_only(snapshot: DnsmasqSnapshot) -> Tuple[Optional[Dict[str, List[str]]], Optional[str]]:
+    """
+    Parse the snapshotted dnsmasq config using Augeas and return DNS-only information:
+    - globals: selected global DNS directives
+    - zones: zone/override directives (server/local/address/etc.)
+    """
+    Augeas, err = _try_get_augeas()
+    if err:
+        return None, err
+
+    try:
+        aug = Augeas(root=snapshot.snapshot_dir)
+        # Explicit transforms: dnsmasq.conf and all files inside dnsmasq.d
+        aug.transform("Dnsmasq", "/etc/dnsmasq.conf")
+        aug.transform("Dnsmasq", "/etc/dnsmasq.d/*")
+        aug.load()
+    except Exception as e:
+        return None, f"Failed to parse dnsmasq config with Augeas: {type(e).__name__}: {e}"
+
+    globals_out: List[str] = []
+    zones_out: List[str] = []
+
+    for base in _dnsmasq_file_tree_paths(snapshot):
+        try:
+            nodes = aug.match(base + "/*") or []
+        except Exception:
+            nodes = []
+        for node in nodes:
+            key = str(node).rsplit("/", 1)[-1]
+            # Normalize array-style keys like server[1] -> server
+            if "[" in key:
+                key0 = key.split("[", 1)[0]
+            else:
+                key0 = key
+            try:
+                val = aug.get(node)
+            except Exception:
+                val = None
+
+            if key0 in _DNS_ZONE_KEYS:
+                zones_out.append(_fmt_directive(key0, val))
+                continue
+            if key0 in _DNS_GLOBAL_KEYS:
+                globals_out.append(_fmt_directive(key0, val))
+                continue
+
+    # Stable output
+    globals_out = sorted(dict.fromkeys(globals_out))
+    zones_out = sorted(dict.fromkeys(zones_out))
+
+    return {"globals": globals_out, "zones": zones_out}, None
 
 
 def snapshot_dnsmasq_configs() -> Tuple[Optional[DnsmasqSnapshot], Optional[str]]:
@@ -106,20 +215,4 @@ def snapshot_dnsmasq_configs() -> Tuple[Optional[DnsmasqSnapshot], Optional[str]
         return DnsmasqSnapshot(snapshot_dir=snap_dir, files=rel_files), None
     except Exception as e:
         return None, f"Failed to fetch dnsmasq config via SSH: {type(e).__name__}: {e}"
-
-
-def load_and_parse_snapshot(snapshot: DnsmasqSnapshot) -> Dict[str, List[str]]:
-    """
-    Load the locally-snapshotted files and return parsed config lines by file.
-    """
-    out: Dict[str, List[str]] = {}
-    for rel in snapshot.files:
-        abs_path = os.path.join(snapshot.snapshot_dir, rel)
-        try:
-            with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
-                text = f.read()
-        except OSError:
-            text = ""
-        out[rel] = _parse_dnsmasq_lines(text)
-    return out
 
