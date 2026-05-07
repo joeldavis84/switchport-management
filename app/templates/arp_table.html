@@ -9,7 +9,7 @@
         </div>
         <div class="btn-group submenu-items" role="group" aria-label="Navigation">
             <a href="{{ url_for('switches.manage_switch', id=switch.id) }}" class="btn btn-outline-dark">Ports</a>
-            <a href="{{ url_for('switches.vlan_table', id=switch.id) }}" class="btn btn-outline-secondary">View VLANs</a>
+            <a href="{{ url_for('switches.vlan_table', id=switch.id) }}" class="btn btn-outline-dark">View VLANs</a>
             <a href="#" class="btn btn-primary" aria-current="page">View ARP table</a>
             <a href="{{ url_for('switches.switch_logs', id=switch.id) }}" class="btn btn-outline-dark">View logs</a>
             <a href="{{ url_for('switches.switch_commands', id=switch.id) }}" class="btn btn-outline-dark">Commands</a>
