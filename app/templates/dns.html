@@ -210,13 +210,21 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
             var directive = escapeHtml(rawDirective);
             var displayRaw = String(it.display || '');
             var dLower = rawDirective.toLowerCase();
-            var displayHtml;
-            if (dLower === 'listen-address') {
-                displayHtml = listenAddressListDisplayHtml(displayRaw);
-            } else if (dLower === 'domain') {
-                displayHtml = domainDirectiveDisplayHtml(displayRaw);
-            } else {
-                displayHtml = '<div class="font-monospace small text-break">' + escapeHtml(displayRaw) + '</div>';
+            var noDisplayDirectives = {
+                'bogus-priv': true,
+                'bind-dynamic': true,
+                'domain-needed': true,
+                'strict-order': true
+            };
+            var displayHtml = '';
+            if (!noDisplayDirectives[dLower]) {
+                if (dLower === 'listen-address') {
+                    displayHtml = listenAddressListDisplayHtml(displayRaw);
+                } else if (dLower === 'domain') {
+                    displayHtml = domainDirectiveDisplayHtml(displayRaw);
+                } else {
+                    displayHtml = '<div class="font-monospace small text-break">' + escapeHtml(displayRaw) + '</div>';
+                }
             }
             var source = escapeHtml(it.source || '');
             var ap = escapeHtml(it.augeas_path || '');
@@ -232,7 +240,9 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
             html += '<code class="' + codeClass + '"' + tipAttr + '>' + directive + '</code>';
             html += '<span class="badge text-bg-secondary">' + source + '</span>';
             html += '</div>';
-            html += displayHtml;
+            if (displayHtml) {
+                html += displayHtml;
+            }
             //if (ap) {
             //    html += '<div class="text-muted mt-2 small"><span class="font-monospace text-break">' + ap + '</span></div>';
             //}
