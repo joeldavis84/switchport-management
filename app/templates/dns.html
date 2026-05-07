@@ -207,6 +207,49 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
             escapeHtml(path) + '</span></div>';
     }
 
+    /**
+     * address=: last slash-separated segment is the IP; preceding segments are the hostname/path.
+     * Wildcard? Yes when the hostname part uses dnsmasq wildcard markers (# or *).
+     */
+    function addressDirectiveDisplayHtml(displayRaw) {
+        var s = String(displayRaw || '').trim();
+        var eq = s.indexOf('=');
+        if (eq !== -1 && s.slice(0, eq).trim().toLowerCase() === 'address') {
+            s = s.slice(eq + 1).trim();
+        }
+        if (s.startsWith('/')) {
+            s = s.slice(1);
+        }
+        var parts = s.split('/').map(function (p) {
+            return p.trim();
+        }).filter(function (p) {
+            return p.length > 0;
+        });
+        var hostName = '';
+        var ipAddress = '';
+        if (parts.length === 0) {
+            return '<div class="mt-2 small text-muted">(unable to parse address)</div>';
+        }
+        if (parts.length === 1) {
+            ipAddress = parts[0];
+            hostName = '';
+        } else {
+            ipAddress = parts[parts.length - 1];
+            hostName = parts.slice(0, -1).join('/');
+        }
+        var isWildcard = /[#*]/.test(hostName);
+        var yn = isWildcard ? 'Yes' : 'No';
+        return (
+            '<div class="mt-2 small">' +
+            '<div class="mb-1"><b>Hostname:</b> <span class="font-monospace text-break">' +
+            escapeHtml(hostName || '(none)') + '</span></div>' +
+            '<div class="mb-1"><b>IP Address:</b> <span class="font-monospace text-break">' +
+            escapeHtml(ipAddress) + '</span></div>' +
+            '<div class="mb-0"><b>Wildcard?</b> ' + yn + '</div>' +
+            '</div>'
+        );
+    }
+
     function setParseWarnings(list) {
         if (!warnEl) {
             return;
@@ -248,6 +291,8 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
                     displayHtml = domainDirectiveDisplayHtml(displayRaw);
                 } else if (dLower === 'resolv-file') {
                     displayHtml = resolvFileDisplayHtml(displayRaw);
+                } else if (dLower === 'address') {
+                    displayHtml = addressDirectiveDisplayHtml(displayRaw);
                 } else {
                     displayHtml = '<div class="font-monospace small text-break">' + escapeHtml(displayRaw) + '</div>';
                 }
