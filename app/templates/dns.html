@@ -1,0 +1,132 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-3">
+    <h2 class="h4 mb-0">Network Service Configuration: DNS</h2>
+    <div class="d-flex flex-column align-items-end gap-2">
+        <a href="{{ url_for('switches.index') }}" class="btn btn-secondary rounded-pill">Back to Switches</a>
+    </div>
+</div>
+
+<p class="text-muted small mb-3">
+    Read-only view of dnsmasq configuration fetched over SSH from <code>192.168.27.12</code>.
+    Each page load triggers an async refresh that snapshots <code>/etc/dnsmasq.conf</code> and <code>/etc/dnsmasq.d/*</code> into this container and re-parses them.
+</p>
+
+<div id="dnsmasqError" class="alert alert-danger d-none" role="alert"></div>
+
+<div id="dnsmasqContent">
+    <p class="text-muted small mb-2">Configuration items will render here after refresh completes.</p>
+    <div class="accordion" id="dnsmasqAccordion"></div>
+</div>
+
+<div class="modal fade" id="dnsmasqRefreshModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title">Refreshing DNS configuration…</h5>
+            </div>
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-primary mb-3" role="status" aria-label="Loading">
+                    <span class="visually-hidden">Loading…</span>
+                </div>
+                <p class="text-muted mb-0 small">Copying dnsmasq configuration into this container and parsing it.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var refreshUrl = {{ url_for('switches.dns_refresh')|tojson }};
+    var modalEl = document.getElementById('dnsmasqRefreshModal');
+    var errEl = document.getElementById('dnsmasqError');
+    var acc = document.getElementById('dnsmasqAccordion');
+    if (!modalEl || !acc || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+        return;
+    }
+
+    var modal = bootstrap.Modal.getOrCreateInstance(modalEl, { backdrop: 'static', keyboard: false });
+
+    function setError(msg) {
+        if (!msg) {
+            errEl.classList.add('d-none');
+            errEl.textContent = '';
+            return;
+        }
+        errEl.textContent = msg;
+        errEl.classList.remove('d-none');
+    }
+
+    function escapeHtml(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\"/g, '&quot;');
+    }
+
+    function renderAccordion(files) {
+        acc.innerHTML = '';
+        var keys = Object.keys(files || {});
+        keys.sort();
+        if (keys.length === 0) {
+            acc.innerHTML = '<div class="text-muted small">No configuration items found.</div>';
+            return;
+        }
+        keys.forEach(function (rel, idx) {
+            var lines = files[rel] || [];
+            var itemId = 'dnsmasqItem' + idx;
+            var headId = 'dnsmasqHead' + idx;
+            var collapseId = 'dnsmasqCollapse' + idx;
+            var pre = escapeHtml(lines.join('\\n'));
+            var bodyHtml = pre ? ('<pre class="mb-0 small" style="white-space: pre-wrap;">' + pre + '</pre>') :
+                '<div class="text-muted small">No active directives in this file.</div>';
+            var open = idx === 0 ? ' show' : '';
+            acc.insertAdjacentHTML('beforeend',
+                '<div class="accordion-item">' +
+                '  <h2 class="accordion-header" id="' + headId + '">' +
+                '    <button class="accordion-button' + (idx === 0 ? '' : ' collapsed') + '" type="button" data-bs-toggle="collapse" data-bs-target="#' + collapseId + '" aria-expanded="' + (idx === 0 ? 'true' : 'false') + '" aria-controls="' + collapseId + '">' +
+                escapeHtml(rel) +
+                '    </button>' +
+                '  </h2>' +
+                '  <div id="' + collapseId + '" class="accordion-collapse collapse' + open + '" aria-labelledby="' + headId + '" data-bs-parent="#dnsmasqAccordion">' +
+                '    <div class="accordion-body">' + bodyHtml + '</div>' +
+                '  </div>' +
+                '</div>'
+            );
+        });
+    }
+
+    modal.show();
+    fetch(refreshUrl, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+        .then(function (r) {
+            var ct = (r.headers.get('content-type') || '').toLowerCase();
+            if (ct.indexOf('application/json') === -1) {
+                throw new Error('Expected JSON response');
+            }
+            return r.json();
+        })
+        .then(function (data) {
+            if (!data || typeof data !== 'object') {
+                setError('Unexpected response.');
+                return;
+            }
+            if (!data.ok) {
+                setError(data.error || 'Refresh failed.');
+                return;
+            }
+            setError('');
+            renderAccordion(data.files || {});
+        })
+        .catch(function () {
+            setError('Could not reach the server or the response was invalid.');
+        })
+        .finally(function () {
+            modal.hide();
+        });
+})();
+</script>
+{% endblock %}
+

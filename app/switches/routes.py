@@ -1,6 +1,7 @@
 from flask import abort, flash, jsonify, redirect, render_template, request, url_for
 from app import db
 from app.models import Switch, SwitchNote, VlanNote
+from app.dnsmasq_utils import load_and_parse_snapshot, snapshot_dnsmasq_configs
 from . import switches_bp
 from .arista_utils import (
     apply_switch_dns_global,
@@ -16,6 +17,26 @@ from .arista_utils import (
     run_switch_getent_hosts,
     run_switch_ping,
 )
+
+
+@switches_bp.route("/dns", methods=["GET"])
+def dns_index():
+    return render_template("dns.html")
+
+
+@switches_bp.route("/dns/refresh", methods=["GET"])
+def dns_refresh():
+    snap, err = snapshot_dnsmasq_configs()
+    if err or snap is None:
+        return jsonify({"ok": False, "error": err or "Snapshot failed."})
+    parsed = load_and_parse_snapshot(snap)
+    return jsonify(
+        {
+            "ok": True,
+            "snapshot_dir": snap.snapshot_dir,
+            "files": parsed,
+        }
+    )
 
 @switches_bp.route('/')
 def index():
