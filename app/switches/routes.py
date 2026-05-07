@@ -1,3 +1,6 @@
+import csv
+from pathlib import Path
+
 from flask import abort, flash, jsonify, redirect, render_template, request, url_for
 from app import db
 from app.models import Switch, SwitchNote, VlanNote
@@ -19,9 +22,33 @@ from .arista_utils import (
 )
 
 
+def _dnsmasq_configuration_help_rows():
+    """
+    Load [directive, description] pairs from app/dnsmasq-configuration-values.csv
+    for embedding in the DNS UI (tooltips).
+    """
+    path = Path(__file__).resolve().parent.parent / "dnsmasq-configuration-values.csv"
+    rows = []
+    try:
+        with path.open(newline="", encoding="utf-8") as fh:
+            reader = csv.reader(fh)
+            for parts in reader:
+                if not parts or not str(parts[0]).strip():
+                    continue
+                key = str(parts[0]).strip()
+                desc = ",".join(parts[1:]).strip() if len(parts) > 1 else ""
+                rows.append([key, desc])
+    except OSError:
+        pass
+    return rows
+
+
 @switches_bp.route("/dns", methods=["GET"])
 def dns_index():
-    return render_template("dns.html")
+    return render_template(
+        "dns.html",
+        dnsmasq_directive_help=_dnsmasq_configuration_help_rows(),
+    )
 
 
 @switches_bp.route("/dns/refresh", methods=["GET"])

@@ -1,5 +1,12 @@
 {% extends 'base.html' %}
 {% block content %}
+<style>
+code.dnsmasq-directive-name.dnsmasq-has-tooltip {
+    cursor: help;
+    text-decoration: underline dotted;
+    text-underline-offset: 0.15em;
+}
+</style>
 <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-3">
     <h2 class="h4 mb-0">Network Service Configuration: DNS</h2>
     <div class="d-flex flex-column align-items-end gap-2">
@@ -43,7 +50,35 @@
 
 {% block scripts %}
 <script>
+/* Directive descriptions: app/dnsmasq-configuration-values.csv (each row [name, description]). */
+var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson }};
 (function () {
+    var DNSMASQ_DESC_BY_DIRECTIVE = {};
+    (Array.isArray(DNSMASQ_DIRECTIVE_HELP) ? DNSMASQ_DIRECTIVE_HELP : []).forEach(function (row) {
+        if (!row || row.length < 1) {
+            return;
+        }
+        var k = String(row[0] || '').trim().toLowerCase();
+        var v = row.length >= 2 ? String(row[1] || '').trim() : '';
+        if (!k || !v) {
+            return;
+        }
+        DNSMASQ_DESC_BY_DIRECTIVE[k] = v;
+    });
+
+    function descriptionForDirective(name) {
+        return DNSMASQ_DESC_BY_DIRECTIVE[String(name || '').trim().toLowerCase()] || '';
+    }
+
+    function escapeAttr(s) {
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
     var refreshUrl = {{ url_for('switches.dns_refresh')|tojson }};
     var modalEl = document.getElementById('dnsmasqRefreshModal');
     var errEl = document.getElementById('dnsmasqError');
@@ -96,13 +131,21 @@
         }
         var html = '<ul class="list-group list-group-flush">';
         items.forEach(function (it) {
-            var directive = escapeHtml(it.directive || '');
+            var rawDirective = String(it.directive || '').trim();
+            var directive = escapeHtml(rawDirective);
             var display = escapeHtml(it.display || '');
             var source = escapeHtml(it.source || '');
             var ap = escapeHtml(it.augeas_path || '');
+            var tip = descriptionForDirective(rawDirective);
+            var codeClass = 'fw-semibold dnsmasq-directive-name';
+            var tipAttr = '';
+            if (tip) {
+                codeClass += ' dnsmasq-has-tooltip';
+                tipAttr = ' title="' + escapeAttr(tip) + '"';
+            }
             html += '<li class="list-group-item px-3 py-3">';
             html += '<div class="d-flex flex-wrap gap-2 align-items-baseline">';
-            html += '<code class="fw-semibold">' + directive + '</code>';
+            html += '<code class="' + codeClass + '"' + tipAttr + '>' + directive + '</code>';
             html += '<span class="badge text-bg-secondary">' + source + '</span>';
             html += '</div>';
             html += '<div class="font-monospace small text-break mt-2">' + display + '</div>';
