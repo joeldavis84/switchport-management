@@ -30,7 +30,8 @@
     <h2 class="mb-0">Manage: {{ switch.description }} ({{ switch.ip_address }})</h2>
     <div class="d-flex flex-column align-items-end gap-2">
         <a href="{{ url_for('switches.index') }}" class="btn btn-secondary rounded-pill">Back to Switches</a>
-        <div class="btn-group" role="group" aria-label="Switch read-only views">
+        <div class="btn-group submenu-items" role="group" aria-label="Switch read-only views">
+            <a href="{{ url_for('switches.manage_switch', id=switch.id) }}" class="btn btn-primary" aria-current="page">Ports</a>
             <a href="{{ url_for('switches.vlan_table', id=switch.id) }}" class="btn btn-outline-secondary">View VLANs</a>
             <a href="{{ url_for('switches.arp_table', id=switch.id) }}" class="btn btn-outline-secondary">View ARP table</a>
             <a href="{{ url_for('switches.switch_logs', id=switch.id) }}" class="btn btn-outline-dark">View logs</a>
@@ -71,7 +72,7 @@
         <button class="nav-link active{% if data.hash %} disabled{% endif %}" id="manage-config-tab" data-bs-toggle="tab" data-bs-target="#manageConfigPane" type="button" role="tab" aria-controls="manageConfigPane" aria-selected="true"{% if data.hash %} disabled aria-disabled="true"{% endif %}>Switch port configuration</button>
     </li>
     <li class="nav-item" role="presentation">
-        <button class="nav-link{% if data.hash %} disabled{% endif %}" id="manage-controls-tab" data-bs-toggle="tab" data-bs-target="#manageControlsPane" type="button" role="tab" aria-controls="manageControlsPane" aria-selected="false"{% if data.hash %} disabled aria-disabled="true"{% endif %}>Controls</button>
+        <button class="nav-link{% if data.hash %} disabled{% endif %}" id="manage-controls-tab" data-bs-toggle="tab" data-bs-target="#manageControlsPane" type="button" role="tab" aria-controls="manageControlsPane" aria-selected="false"{% if data.hash %} disabled aria-disabled="true"{% endif %}>Port Controls</button>
     </li>
     <li class="nav-item" role="presentation">
         <button class="nav-link" id="manage-notes-tab" data-bs-toggle="tab" data-bs-target="#manageNotesPane" type="button" role="tab" aria-controls="manageNotesPane" aria-selected="false">Switch Notes</button>
@@ -172,6 +173,7 @@
         </form>
     </div>
     <div class="tab-pane fade" id="manageDnsPane" role="tabpanel" aria-labelledby="manage-dns-tab" tabindex="0">
+        <h3 class="h3">Global DNS Configuration</h3>
         <p class="text-muted small">Configure global DNS for the default (non-VRF) context using <code>ip name-server vrf default …</code> and <code>ip domain-list …</code>. This tab never uses the interface selector or port forms. Applying replaces existing global name servers and domain search entries read from the switch, commits with <code>write memory</code>, and appends verification output below.</p>
         <div id="dnsLoadError" class="alert alert-warning d-none mb-3" role="alert"></div>
         <form id="dnsGlobalForm" class="mb-4">
@@ -192,7 +194,7 @@
         <pre id="dnsCliOutputPre" class="border rounded p-3 small mb-0 bg-body-secondary text-body" style="white-space: pre-wrap; max-height: 45vh; overflow: auto;">Open this tab to load current DNS from the switch. After you apply, configuration and verification output appears here.</pre>
 
         <hr class="my-4">
-        <h3 class="h6">Test DNS resolution</h3>
+        <h3 class="h3">Test DNS resolution</h3>
         <p class="text-muted small">Runs on the switch as <code>bash getent hosts …</code> (libc NSS/DNS). Uses only the name below—not the interface selector or the apply form fields.</p>
         <form id="dnsGetentForm" class="mb-3">
             <div class="row g-3 align-items-end flex-wrap">
@@ -202,7 +204,7 @@
                     <div class="invalid-feedback" id="dnsGetentHostFeedback">Enter a valid hostname, FQDN, or IP address.</div>
                 </div>
                 <div class="col-auto">
-                    <button type="submit" class="btn btn-outline-primary" id="dnsGetentSubmitBtn">Run getent hosts</button>
+                    <button type="submit" class="btn btn-outline-primary" id="dnsGetentSubmitBtn">Resolve</button>
                 </div>
             </div>
         </form>
