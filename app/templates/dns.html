@@ -16,11 +16,7 @@ code.dnsmasq-directive-name.dnsmasq-has-tooltip {
 
 <p class="text-muted small mb-3">
     Read-only view of dnsmasq configuration fetched over SSH from <code>192.168.27.12</code>.
-    Each page load triggers an async refresh that snapshots <code>/etc/dnsmasq.conf</code> and every regular file in <code>/etc/dnsmasq.d/</code> into this container, then loads it with the <strong>Augeas Dnsmasq lens</strong> and walks the resulting tree so each DNS-related directive is shown as its own row.
-</p>
-
-<p class="text-muted small mb-3">
-    This view is DNS-only: DHCP-related directives are intentionally omitted.
+    Each page load triggers an async refresh that snapshots <code>/etc/dnsmasq.conf</code> and every regular file in <code>/etc/dnsmasq.d/</code>.
 </p>
 
 <div id="dnsmasqError" class="alert alert-danger d-none" role="alert"></div>
@@ -142,6 +138,51 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
         };
     })();
 
+    /**
+     * For domain, treat the RHS as up to three comma-separated values (no assumption
+     * beyond the first): (1) domain name, (2) optional subnet, (3) optional flag
+     * whose presence yields "<b>Locally Authority:</b> Yes".
+     */
+    var domainDirectiveDisplayHtml = (function () {
+        function parseParts(displayRaw) {
+            var s = String(displayRaw || '').trim();
+            if (!s) {
+                return [];
+            }
+            var eq = s.indexOf('=');
+            if (eq !== -1 && s.slice(0, eq).trim().toLowerCase() === 'domain') {
+                s = s.slice(eq + 1).trim();
+            }
+            if (!s) {
+                return [];
+            }
+            return s.split(',').map(function (p) {
+                return p.trim();
+            });
+        }
+        return function (displayRaw) {
+            var parts = parseParts(displayRaw);
+            if (parts.length === 0) {
+                return '<span class="text-muted">(no domain value)</span>';
+            }
+            var name = parts[0] || '';
+            var subnet = parts.length >= 2 ? parts[1] : '';
+            var third = parts.length >= 3 ? parts[2] : '';
+            var out = '<div class="mt-2 small">';
+            out += '<div class="mb-1"><span class="text-muted">Domain name</span>: ';
+            out += '<span class="font-monospace text-break">' + escapeHtml(name) + '</span></div>';
+            if (subnet) {
+                out += '<div class="mb-1"><span class="text-muted">Subnet</span>: ';
+                out += '<span class="font-monospace text-break">' + escapeHtml(subnet) + '</span></div>';
+            }
+            if (third) {
+                out += '<div class="mb-0"><b>Locally Authority:</b> Yes</div>';
+            }
+            out += '</div>';
+            return out;
+        };
+    })();
+
     function setParseWarnings(list) {
         if (!warnEl) {
             return;
@@ -168,9 +209,15 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
             var rawDirective = String(it.directive || '').trim();
             var directive = escapeHtml(rawDirective);
             var displayRaw = String(it.display || '');
-            var displayHtml = rawDirective.toLowerCase() === 'listen-address'
-                ? listenAddressListDisplayHtml(displayRaw)
-                : ('<div class="font-monospace small text-break">' + escapeHtml(displayRaw) + '</div>');
+            var dLower = rawDirective.toLowerCase();
+            var displayHtml;
+            if (dLower === 'listen-address') {
+                displayHtml = listenAddressListDisplayHtml(displayRaw);
+            } else if (dLower === 'domain') {
+                displayHtml = domainDirectiveDisplayHtml(displayRaw);
+            } else {
+                displayHtml = '<div class="font-monospace small text-break">' + escapeHtml(displayRaw) + '</div>';
+            }
             var source = escapeHtml(it.source || '');
             var ap = escapeHtml(it.augeas_path || '');
             var tip = descriptionForDirective(rawDirective);
