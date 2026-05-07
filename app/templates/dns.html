@@ -183,6 +183,30 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
         };
     })();
 
+    /**
+     * resolv-file: empty RHS defaults to /etc/resolv.conf; show as <b>Path:</b> value.
+     */
+    function resolvFileDisplayHtml(displayRaw) {
+        var s = String(displayRaw || '').trim();
+        var path = '';
+        var defaultPath = '/etc/resolv.conf';
+        if (!s || /^resolv-file$/i.test(s)) {
+            path = defaultPath;
+        } else {
+            var eq = s.indexOf('=');
+            if (eq !== -1 && s.slice(0, eq).trim().toLowerCase() === 'resolv-file') {
+                path = s.slice(eq + 1).trim();
+            } else {
+                path = s;
+            }
+            if (!path) {
+                path = defaultPath;
+            }
+        }
+        return '<div class="mt-2 small"><b>Path:</b> <span class="font-monospace text-break">' +
+            escapeHtml(path) + '</span></div>';
+    }
+
     function setParseWarnings(list) {
         if (!warnEl) {
             return;
@@ -222,6 +246,8 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
                     displayHtml = listenAddressListDisplayHtml(displayRaw);
                 } else if (dLower === 'domain') {
                     displayHtml = domainDirectiveDisplayHtml(displayRaw);
+                } else if (dLower === 'resolv-file') {
+                    displayHtml = resolvFileDisplayHtml(displayRaw);
                 } else {
                     displayHtml = '<div class="font-monospace small text-break">' + escapeHtml(displayRaw) + '</div>';
                 }
