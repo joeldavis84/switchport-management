@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2>Configured Switches</h2>
+    <h2 class="h4 mb-0">Configured Switches</h2>
     <a href="{{ url_for('switches.add_switch') }}" class="btn btn-primary">Add Switch</a>
 </div>
 <ul class="list-group">
@@ -19,7 +19,9 @@
 
 <hr class="my-4">
 
-<h2 class="h4 mb-3">Network Service Configuration</h2>
+<div class="mb-3">
+    <h2 class="h4 mb-0">Network Service Configuration</h2>
+</div>
 <div class="list-group mb-4">
     <a href="#" class="list-group-item list-group-item-action">Manage DNS</a>
     <a href="#" class="list-group-item list-group-item-action">Manage DHCP</a>
