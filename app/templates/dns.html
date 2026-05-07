@@ -108,6 +108,40 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
             .replace(/\"/g, '&quot;');
     }
 
+    /**
+     * For listen-address, treat display as comma-separated addresses (after optional
+     * "listen-address=" prefix) and return HTML for a bulleted list.
+     */
+    var listenAddressListDisplayHtml = (function () {
+        function parseRhs(displayRaw) {
+            var s = String(displayRaw || '').trim();
+            if (!s) {
+                return [];
+            }
+            var eq = s.indexOf('=');
+            if (eq !== -1 && s.slice(0, eq).trim().toLowerCase() === 'listen-address') {
+                s = s.slice(eq + 1).trim();
+            }
+            return s.split(',').map(function (p) {
+                return p.trim();
+            }).filter(function (p) {
+                return p.length > 0;
+            });
+        }
+        return function (displayRaw) {
+            var addrs = parseRhs(displayRaw);
+            if (addrs.length === 0) {
+                return '<span class="text-muted">(no addresses)</span>';
+            }
+            var out = '<ul class="mb-0 ps-3 mt-2 small font-monospace">';
+            addrs.forEach(function (a) {
+                out += '<li class="text-break">' + escapeHtml(a) + '</li>';
+            });
+            out += '</ul>';
+            return out;
+        };
+    })();
+
     function setParseWarnings(list) {
         if (!warnEl) {
             return;
@@ -133,7 +167,10 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
         items.forEach(function (it) {
             var rawDirective = String(it.directive || '').trim();
             var directive = escapeHtml(rawDirective);
-            var display = escapeHtml(it.display || '');
+            var displayRaw = String(it.display || '');
+            var displayHtml = rawDirective.toLowerCase() === 'listen-address'
+                ? listenAddressListDisplayHtml(displayRaw)
+                : ('<div class="font-monospace small text-break">' + escapeHtml(displayRaw) + '</div>');
             var source = escapeHtml(it.source || '');
             var ap = escapeHtml(it.augeas_path || '');
             var tip = descriptionForDirective(rawDirective);
@@ -148,10 +185,10 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
             html += '<code class="' + codeClass + '"' + tipAttr + '>' + directive + '</code>';
             html += '<span class="badge text-bg-secondary">' + source + '</span>';
             html += '</div>';
-            html += '<div class="font-monospace small text-break mt-2">' + display + '</div>';
-            if (ap) {
-                html += '<div class="text-muted mt-2 small"><span class="font-monospace text-break">' + ap + '</span></div>';
-            }
+            html += displayHtml;
+            //if (ap) {
+            //    html += '<div class="text-muted mt-2 small"><span class="font-monospace text-break">' + ap + '</span></div>';
+            //}
             html += '</li>';
         });
         html += '</ul>';
