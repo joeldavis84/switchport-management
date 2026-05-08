@@ -208,8 +208,10 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
     }
 
     /**
-     * address=: last slash-separated segment is the IP; preceding segments are the hostname/path.
-     * Wildcard? Yes when the hostname part uses dnsmasq wildcard markers (# or *).
+     * address=: if the RHS contains no '/', treat it as comma-separated (hostname [, ip]);
+     * a lone value is displayed as IP only. If '/' is present (dnsmasq path / wildcard syntax),
+     * last slash segment is IP and preceding segments are the hostname path. Wildcard? is Yes
+     * only for that slash form when the RHS contains neither # nor *.
      */
     function addressDirectiveDisplayHtml(displayRaw) {
         var s = String(displayRaw || '').trim();
@@ -217,35 +219,76 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
         if (eq !== -1 && s.slice(0, eq).trim().toLowerCase() === 'address') {
             s = s.slice(eq + 1).trim();
         }
-        if (s.startsWith('/')) {
-            s = s.slice(1);
-        }
-        var parts = s.split('/').map(function (p) {
-            return p.trim();
-        }).filter(function (p) {
-            return p.length > 0;
-        });
+        var rhs = s;
         var hostName = '';
         var ipAddress = '';
-        if (parts.length === 0) {
-            return '<div class="mt-2 small text-muted">(unable to parse address)</div>';
-        }
-        if (parts.length === 1) {
-            ipAddress = parts[0];
-            hostName = '';
+        var isWildcard = false;
+        if (rhs.indexOf('/') === -1) {
+            var commaIdx = rhs.indexOf(',');
+            if (commaIdx === -1) {
+                ipAddress = rhs;
+                hostName = '';
+            } else {
+                hostName = rhs.slice(0, commaIdx).trim();
+                ipAddress = rhs.slice(commaIdx + 1).trim();
+            }
+            isWildcard = false;
         } else {
-            ipAddress = parts[parts.length - 1];
-            hostName = parts.slice(0, -1).join('/');
+            s = rhs;
+            if (s.startsWith('/')) {
+                s = s.slice(1);
+            }
+            var parts = s.split('/').map(function (p) {
+                return p.trim();
+            }).filter(function (p) {
+                return p.length > 0;
+            });
+            if (parts.length === 0) {
+                return '<div class="mt-2 small text-muted">(unable to parse address)</div>';
+            }
+            if (parts.length === 1) {
+                ipAddress = parts[0];
+                hostName = '';
+            } else {
+                ipAddress = parts[parts.length - 1];
+                hostName = parts.slice(0, -1).join('/');
+            }
+            var noPoundOrAsterisk =
+                rhs.indexOf('#') === -1 && rhs.indexOf('*') === -1;
+            isWildcard = noPoundOrAsterisk;
         }
-        var isWildcard = /[#*]/.test(hostName);
         var yn = isWildcard ? 'Yes' : 'No';
         return (
             '<div class="mt-2 small">' +
             '<div class="mb-1"><b>Hostname:</b> <span class="font-monospace text-break">' +
             escapeHtml(hostName || '(none)') + '</span></div>' +
             '<div class="mb-1"><b>IP Address:</b> <span class="font-monospace text-break">' +
-            escapeHtml(ipAddress) + '</span></div>' +
+            escapeHtml(ipAddress || '(none)') + '</span></div>' +
             '<div class="mb-0"><b>Wildcard?</b> ' + yn + '</div>' +
+            '</div>'
+        );
+    }
+
+    /**
+     * host-record: RHS is CSV; first column = hostname, second = IP address.
+     */
+    function hostRecordDisplayHtml(displayRaw) {
+        var s = String(displayRaw || '').trim();
+        var eq = s.indexOf('=');
+        if (eq !== -1 && s.slice(0, eq).trim().toLowerCase() === 'host-record') {
+            s = s.slice(eq + 1).trim();
+        }
+        var parts = s.split(',').map(function (p) {
+            return p.trim();
+        });
+        var hostName = parts.length > 0 ? parts[0] : '';
+        var ipAddress = parts.length > 1 ? parts[1] : '';
+        return (
+            '<div class="mt-2 small">' +
+            '<div class="mb-1"><b>Hostname:</b> <span class="font-monospace text-break">' +
+            escapeHtml(hostName || '(none)') + '</span></div>' +
+            '<div class="mb-0"><b>IP Address:</b> <span class="font-monospace text-break">' +
+            escapeHtml(ipAddress || '(none)') + '</span></div>' +
             '</div>'
         );
     }
@@ -293,6 +336,8 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
                     displayHtml = resolvFileDisplayHtml(displayRaw);
                 } else if (dLower === 'address') {
                     displayHtml = addressDirectiveDisplayHtml(displayRaw);
+                } else if (dLower === 'host-record') {
+                    displayHtml = hostRecordDisplayHtml(displayRaw);
                 } else {
                     displayHtml = '<div class="font-monospace small text-break">' + escapeHtml(displayRaw) + '</div>';
                 }
@@ -344,7 +389,7 @@ var DNSMASQ_DIRECTIVE_HELP = {{ dnsmasq_directive_help|default([], true)|tojson 
     function renderAccordion(globals, zones, parseErrors) {
         acc.innerHTML = '';
         setParseWarnings(parseErrors);
-        addAccordionPane(0, 'dnsmasq globals', renderDirectiveList(globals), true);
+        addAccordionPane(0, 'dnsmasq globals', renderDirectiveList(globals), false);
         addAccordionPane(1, 'Zone information', renderDirectiveList(zones), false);
     }
 
